@@ -3,7 +3,7 @@ Section: net
 Priority: extra
 Maintainer: Rich Lane <rlane@bigswitch.com>
 Build-Depends: debhelper (>= 8.0.0), liblogback-java, libjackson-json-java, libeasymock-java, libslf4j-java, libnetty-java, libargs4j-java, libconcurrentlinkedhashmap-java, jython
-Standards-Version: 3.9.2
+Standards-Version: 3.9.3
 Homepage: http://floodlight.openflowhub.org/
 Vcs-Git: git://github.com/floodlight/floodlight.git
 Vcs-Browser: https://github.com/floodlight/floodlight
