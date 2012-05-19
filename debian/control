@@ -10,7 +10,7 @@ Vcs-Browser: https://github.com/floodlight/floodlight
 
 Package: floodlight
 Architecture: all
-Depends: liblogback-java, libjackson-json-java, libeasymock-java, libslf4j-java, libnetty-java, libargs4j-java, libconcurrentlinkedhashmap-java, jython
+Depends: ${misc:Depends}, liblogback-java, libjackson-json-java, libeasymock-java, libslf4j-java, libnetty-java, libargs4j-java, libconcurrentlinkedhashmap-java, jython
 Description: Java based OpenFlow controller
  Floodlight is a Java based OpenFlow controller originally written by David
  Erickson at Stanford University.
