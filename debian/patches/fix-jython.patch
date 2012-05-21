@@ -1,0 +1,12 @@
+--- a/build.xml
++++ b/build.xml
+@@ -61,6 +61,9 @@
+         <include name="concurrentlinkedhashmap-lru.jar"/>
+         <include name="jython.jar"/>
+         <include name="thrift.jar"/>
++        <include name="antlr3-runtime.jar"/>
++        <include name="asm3.jar"/>
++        <include name="asm3-tree.jar"/>
+     </patternset>
+     <patternset id="genlib">
+         <include name="packetstreamer-thrift.jar"/>
