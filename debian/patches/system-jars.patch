@@ -1,7 +1,5 @@
-Index: floodlight-packaging/build.xml
-===================================================================
---- floodlight-packaging.orig/build.xml	2012-05-21 13:40:33.000000000 -0700
-+++ floodlight-packaging/build.xml	2012-05-21 13:51:28.684003119 -0700
+--- a/build.xml
++++ b/build.xml
 @@ -23,6 +23,7 @@
  <project default="dist" name="Floodlight">
  
@@ -72,3 +70,41 @@ Index: floodlight-packaging/build.xml
              <patternset refid="lib-test"/>
              <patternset refid="lib"/>
          </fileset>
+@@ -185,32 +186,29 @@
+     </target>
+ 
+     <target name="dist" depends="compile,compile-tests">
++        <pathconvert property="jars" refid="classpath"
++            pathsep=" " dirsep="/">
++        </pathconvert>
+         <jar destfile="${floodlight-jar}" filesetmanifest="mergewithoutmain">
+             <manifest>
+                 <attribute name="Main-Class" value="${main-class}"/>
+-                <attribute name="Class-Path" value="."/>
++                <attribute name="Class-Path" value="${jars}"/>
+             </manifest>
+             <fileset dir="${build}"/>
+         	<fileset dir="${resources}"/>
+             <fileset dir="${python-src}">
+                 <include name="**/*.py"/>
+             </fileset>
+-            <zipgroupfileset dir="lib">
+-                <patternset refid="lib"/>
+-            </zipgroupfileset>
+             <zipgroupfileset dir="${target}/lib">
+                 <patternset refid="genlib"/>
+             </zipgroupfileset>
+         </jar>
+         <jar destfile="${floodlight-test-jar}" filesetmanifest="mergewithoutmain">
+             <manifest>
+-                <attribute name="Class-Path" value="."/>
++                <attribute name="Class-Path" value="${jars}"/>
+             </manifest>
+             <fileset dir="${build-test}"/>
+         	<fileset dir="${resources}"/>
+-            <zipgroupfileset dir="lib">
+-                <patternset refid="lib-test"/>
+-            </zipgroupfileset>
+             <zipgroupfileset dir="${target}/lib">
+                 <patternset refid="genlib"/>
+             </zipgroupfileset>
