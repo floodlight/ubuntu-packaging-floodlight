@@ -1,0 +1,19 @@
+commit fe339a5dd487ad52edbe617acdca07760463e6bd
+Author: Rich Lane <rich.lane@bigswitch.com>
+Date:   Fri May 18 18:17:04 2012 -0700
+
+    set javac source and target explicitly
+
+Index: floodlight-packaging/build.xml
+===================================================================
+--- floodlight-packaging.orig/build.xml	2012-05-21 13:51:28.000000000 -0700
++++ floodlight-packaging/build.xml	2012-05-21 14:07:35.243931399 -0700
+@@ -41,6 +41,8 @@
+     <property name="thrift.dir" value="${basedir}/src/main/thrift"/>
+     <property name="thrift.out.dir" value="${target}/gen-java"/>
+     <property name="thrift.package" value="net/floodlightcontroller/packetstreamer/thrift"/>
++    <property name="ant.build.javac.source" value="1.6"/>
++    <property name="ant.build.javac.target" value="1.6"/>
+ 
+     <patternset id="lib">
+         <include name="logback-classic.jar"/>

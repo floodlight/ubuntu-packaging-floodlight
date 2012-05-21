@@ -1,0 +1,74 @@
+Index: floodlight-packaging/build.xml
+===================================================================
+--- floodlight-packaging.orig/build.xml	2012-05-21 13:40:33.000000000 -0700
++++ floodlight-packaging/build.xml	2012-05-21 13:51:28.684003119 -0700
+@@ -23,6 +23,7 @@
+ <project default="dist" name="Floodlight">
+ 
+     <property name="target" location="target"/>
++    <property name="lib" location="/usr/share/java"/>
+     <property name="build" location="${target}/bin"/>
+     <property name="build-test" location="${target}/bin-test"/>
+     <property name="test-output" location="${target}/test"/>
+@@ -42,29 +43,29 @@
+     <property name="thrift.package" value="net/floodlightcontroller/packetstreamer/thrift"/>
+ 
+     <patternset id="lib">
+-        <include name="logback-classic-1.0.0.jar"/>
+-        <include name="logback-core-1.0.0.jar"/>
+-        <include name="jackson-core-asl-1.8.6.jar"/>
+-        <include name="jackson-mapper-asl-1.8.6.jar"/>
+-        <include name="org.easymock_2.5.2.jar"/>
+-        <include name="slf4j-api-1.6.4.jar"/>
+-        <include name="org.restlet-2.1-RC1.jar"/>
+-        <include name="org.restlet.ext.jackson-2.1-RC1.jar"/>
+-        <include name="org.restlet.ext.simple-2.1-RC1.jar"/>
+-        <include name="org.restlet.ext.slf4j-2.1-RC1.jar"/>
+-        <include name="simple-4.1.21.jar"/>
+-        <include name="netty-3.2.6.Final.jar"/>
+-        <include name="args4j-2.0.16.jar"/>
+-        <include name="concurrentlinkedhashmap-lru-1.2.jar"/>
+-        <include name="jython-2.5.2.jar"/>
+-        <include name="libthrift-0.7.0.jar"/>
++        <include name="logback-classic.jar"/>
++        <include name="logback-core.jar"/>
++        <include name="jackson-core-asl.jar"/>
++        <include name="jackson-mapper-asl.jar"/>
++        <include name="easymock.jar"/>
++        <include name="slf4j-api.jar"/>
++        <include name="restlet.jar"/>
++        <include name="restlet-jackson.jar"/>
++        <include name="restlet-simple.jar"/>
++        <include name="restlet-slf4j.jar"/>
++        <include name="simple.jar"/>
++        <include name="netty.jar"/>
++        <include name="args4j.jar"/>
++        <include name="concurrentlinkedhashmap-lru.jar"/>
++        <include name="jython.jar"/>
++        <include name="thrift.jar"/>
+     </patternset>
+     <patternset id="genlib">
+         <include name="packetstreamer-thrift.jar"/>
+     </patternset>
+ 
+     <path id="classpath">
+-        <fileset dir="lib">
++        <fileset dir="${lib}">
+             <patternset refid="lib"/>
+         </fileset>
+         <fileset dir="${target}/lib">
+@@ -73,11 +74,11 @@
+     </path>
+ 
+     <patternset id="lib-test">
+-        <include name="junit-4.8.2.jar"/>
+-        <include name="org.easymock_2.5.2.jar"/>
++        <include name="junit.jar"/>
++        <include name="easymock.jar"/>
+     </patternset>
+     <path id="classpath-test">
+-        <fileset dir="lib">
++        <fileset dir="${lib}">
+             <patternset refid="lib-test"/>
+             <patternset refid="lib"/>
+         </fileset>

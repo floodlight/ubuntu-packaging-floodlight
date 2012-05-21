@@ -1,0 +1,70 @@
+diff --git a/build.xml b/build.xml
+index cdea14c..25c5f80 100644
+--- a/build.xml
++++ b/build.xml
+@@ -37,6 +37,9 @@
+     <property name="packetstreamer-thrift-jar" location="${target}/lib/packetstreamer-thrift.jar"/>
+     <property name="floodlight-jar" location="${target}/floodlight.jar"/>
+     <property name="floodlight-test-jar" location="${target}/floodlight-test.jar"/>
++    <property name="thrift.dir" value="${basedir}/src/main/thrift"/>
++    <property name="thrift.out.dir" value="${target}/gen-java"/>
++    <property name="thrift.package" value="net/floodlightcontroller/packetstreamer/thrift"/>
+ 
+     <patternset id="lib">
+         <include name="logback-classic-1.0.0.jar"/>
+@@ -54,9 +57,9 @@
+         <include name="args4j-2.0.16.jar"/>
+         <include name="concurrentlinkedhashmap-lru-1.2.jar"/>
+         <include name="jython-2.5.2.jar"/>
++        <include name="libthrift-0.7.0.jar"/>
+     </patternset>
+     <patternset id="genlib">
+-        <include name="libthrift-0.7.0.jar"/>
+         <include name="packetstreamer-thrift.jar"/>
+     </patternset>
+ 
+@@ -84,7 +87,6 @@
+     </path>
+ 
+     <target name="init">
+-        <exec executable="${basedir}/setup.sh" failonerror="true"/>
+         <mkdir dir="${build}"/>
+         <mkdir dir="${build-test}"/>
+         <mkdir dir="${target}/lib"/>
+@@ -111,7 +113,35 @@
+ 	       destdir="${build-test}"/>
+     </target>
+ 
+-    <target name="compile-thrift" depends="init">
++    <!-- Thrift build based on http://www.flester.com/blog/2009/04/26/using-thrift-from-ant -->
++    <fileset id="thrift.files" dir="${thrift.dir}">
++        <include name="**/*.thrift"/>
++    </fileset>
++
++    <!-- Determine if thrift generated java is up to date -->
++    <!-- Removes generated code if the thrift files changed -->
++    <target name="thrift-deps">
++        <dependset>
++            <srcfileset refid="thrift.files"/>
++            <targetfileset dir = "${thrift.out.dir}/${thrift.package}">
++                <include name="**/*.java"/>
++            </targetfileset>
++        </dependset>
++        <available file="${thrift.out.dir}/${thrift.package}/Message.java"
++            property="thrift.uptodate"/>
++    </target>
++
++    <target name="thrift-gen" depends="thrift-deps" unless="thrift.uptodate">
++        <pathconvert property="thrift.file.list" refid="thrift.files"
++            pathsep=" " dirsep="/">
++        </pathconvert>
++        <echo message="Running thrift generator on ${thrift.file.list}"/>
++        <exec executable="thrift" dir="${basedir}" failonerror="true">
++            <arg line="--strict --gen java -o ${target} ${thrift.file.list}"/>
++        </exec>
++    </target>
++
++    <target name="compile-thrift" depends="thrift-gen">
+         <javac srcdir="${packetstreamer-gen}" 
+ 	       includeantruntime="false" 
+ 	       destdir="${packetstreamer-gen-build}"
