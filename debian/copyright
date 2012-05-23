@@ -6,6 +6,14 @@ Files: *
 Copyright: 2011 Big Switch Networks <rlane@bigswitch.com>
 License: Apache-2.0
 
+Files: src/main/java/org/openflow/*
+Copyright: 2008 The Board of Trustees of The Leland Stanford Junior University
+License: Apache-2.0
+
+Files: src/test/java/org/openflow/*
+Copyright: 2008 The Board of Trustees of The Leland Stanford Junior University
+License: Apache-2.0
+
 Files: debian/*
 Copyright: 2012 Big Switch Networks <rlane@bigswitch.com>
 License: Apache-2.0
