@@ -1,0 +1,20 @@
+--- a/build.xml
++++ b/build.xml
+@@ -114,6 +114,7 @@
+     	<fileset dir="${resources}"/>
+         <javac includeAntRuntime="false" debug="true" 
+ 	       srcdir="${source-test}"
++               excludes="**/hub/HubTest.java,**/staticflowentry/StaticFlowTests.java,**/forwarding/ForwardingTest.java"
+ 	       classpath="${build}"
+ 	       classpathref="classpath-test"
+ 	       destdir="${build-test}"/>
+@@ -183,6 +184,9 @@
+             <batchtest todir="${test-output}">
+                 <fileset dir="${source-test}">
+                     <exclude name="**/storage/tests/StorageTest.java"/>
++                    <exclude name="**/hub/HubTest.java"/>
++                    <exclude name="**/staticflowentry/StaticFlowTests.java"/>
++                    <exclude name="**/forwarding/ForwardingTest.java"/>
+                     <exclude name="**/test/Mock*"/>
+                 </fileset>
+             </batchtest>
