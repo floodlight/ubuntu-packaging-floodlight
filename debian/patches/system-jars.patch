@@ -61,7 +61,7 @@
      <patternset id="lib-test">
 -        <include name="junit-4.8.2.jar"/>
 -        <include name="org.easymock_2.5.2.jar"/>
-+        <include name="junit.jar"/>
++        <include name="junit4.jar"/>
 +        <include name="easymock.jar"/>
      </patternset>
      <path id="classpath-test">
