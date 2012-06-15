@@ -1,3 +1,9 @@
+floodlight (0.82-0ubuntu1~ppa2) quantal; urgency=low
+
+  * Add ant-optional to build-depends.
+
+ -- Rich Lane <rlane@bigswitch.com>  Thu, 14 Jun 2012 17:41:54 -0700
+
 floodlight (0.82-0ubuntu1~ppa1) quantal; urgency=low
 
   * Initial Release.
