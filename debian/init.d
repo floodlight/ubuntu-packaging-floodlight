@@ -44,7 +44,7 @@ do_start()
 	#   2 if daemon could not be started
 	start-stop-daemon --start --quiet --pidfile $PIDFILE --startas $DAEMON --test > /dev/null \
 		|| return 1
-	start-stop-daemon --start --quiet --pidfile $PIDFILE --startas $DAEMON -b -m -- \
+	start-stop-daemon --start --quiet --pidfile $PIDFILE --startas $DAEMON --chuid $NAME -b -m -- \
 		$DAEMON_ARGS \
 		|| return 2
         # Wait for the server to start.
