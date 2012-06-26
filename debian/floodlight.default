@@ -1,0 +1,2 @@
+# Options to pass to Floodlight.
+DAEMON_OPTS=" -cf /etc/floodlight/floodlightdefault.properties "

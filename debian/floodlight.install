@@ -1,2 +1,3 @@
 target/floodlight.jar usr/share/floodlight/java
 debian/misc/floodlight usr/bin
+src/main/resources/floodlightdefault.properties etc/floodlight

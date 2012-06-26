@@ -12,4 +12,7 @@ setgid floodlight
 
 respawn
 
-exec /usr/bin/floodlight
+script
+    . /etc/default/floodlight
+    exec floodlight $DAEMON_OPTS
+end script
