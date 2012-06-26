@@ -2,4 +2,4 @@
 /floodlight.debhelper.log
 /floodlight.substvars
 /floodlight
-
+/floodlight.*.debhelper
