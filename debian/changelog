@@ -1,3 +1,10 @@
+floodlight (0.82-0ubuntu1~ppa3) quantal; urgency=low
+
+  * Create and use the floodlight user and group.
+  * Install a properties and default file.
+
+ -- Rich Lane <rlane@bigswitch.com>  Tue, 26 Jun 2012 11:50:22 -0700
+
 floodlight (0.82-0ubuntu1~ppa2) quantal; urgency=low
 
   * Add ant-optional to build-depends.
