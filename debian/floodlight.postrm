@@ -1,0 +1,10 @@
+#!/bin/sh -e
+
+NAME=floodlight
+
+if [ "$1" = "purge" ]; then
+    deluser --quiet --system $NAME || true
+    delgroup --quiet --system $NAME || true
+fi
+
+#DEBHELPER#

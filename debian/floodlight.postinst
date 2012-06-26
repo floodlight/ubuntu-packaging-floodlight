@@ -1,0 +1,9 @@
+#!/bin/sh -e
+
+NAME=floodlight
+
+if [ "$1" = "configure" ]; then
+   adduser --quiet --group --system --no-create-home --home /nonexistent $NAME
+fi
+
+#DEBHELPER#
