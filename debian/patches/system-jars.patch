@@ -38,7 +38,7 @@
 +        <include name="restlet-jackson.jar"/>
 +        <include name="restlet-simple.jar"/>
 +        <include name="restlet-slf4j.jar"/>
-+        <include name="simple.jar"/>
++        <include name="simple-http.jar"/>
 +        <include name="netty.jar"/>
 +        <include name="args4j.jar"/>
 +        <include name="concurrentlinkedhashmap-lru.jar"/>
