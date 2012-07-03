@@ -1,3 +1,4 @@
 system-jars.patch
 fix-jython.patch
 disable-broken-tests.patch
+regen-thrift.patch
