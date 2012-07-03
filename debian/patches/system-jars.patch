@@ -1,15 +1,11 @@
 --- a/build.xml
 +++ b/build.xml
-@@ -23,6 +23,7 @@
- <project default="dist" name="Floodlight">
- 
-     <property name="target" location="target"/>
-+    <property name="lib" location="/usr/share/java"/>
-     <property name="build" location="${target}/bin"/>
-     <property name="build-test" location="${target}/bin-test"/>
-     <property name="test-output" location="${target}/test"/>
-@@ -42,29 +43,29 @@
+@@ -46,25 +46,25 @@
      <property name="thrift.package" value="net/floodlightcontroller/packetstreamer/thrift"/>
+     <property name="ant.build.javac.source" value="1.6"/>
+     <property name="ant.build.javac.target" value="1.6"/>
+-    <property name="lib" location="lib"/>
++    <property name="lib" location="/usr/share/java"/>
  
      <patternset id="lib">
 -        <include name="logback-classic-1.0.0.jar"/>
@@ -45,17 +41,9 @@
 +        <include name="jython.jar"/>
 +        <include name="thrift.jar"/>
      </patternset>
-     <patternset id="genlib">
-         <include name="packetstreamer-thrift.jar"/>
-     </patternset>
  
      <path id="classpath">
--        <fileset dir="lib">
-+        <fileset dir="${lib}">
-             <patternset refid="lib"/>
-         </fileset>
-         <fileset dir="${target}/lib">
-@@ -73,11 +74,11 @@
+@@ -87,8 +87,8 @@
      </path>
  
      <patternset id="lib-test">
@@ -65,15 +53,11 @@
 +        <include name="easymock.jar"/>
      </patternset>
      <path id="classpath-test">
--        <fileset dir="lib">
-+        <fileset dir="${lib}">
-             <patternset refid="lib-test"/>
-             <patternset refid="lib"/>
-         </fileset>
-@@ -185,32 +186,29 @@
-     </target>
+         <fileset dir="${lib}">
+@@ -204,30 +204,26 @@
+     <target name="coverage" depends="instrument,test,coverage-report"/>
  
-     <target name="dist" depends="compile,compile-tests">
+     <target name="dist" depends="compile,compile-test">
 +        <pathconvert property="jars" refid="classpath"
 +            pathsep=" " dirsep="/">
 +        </pathconvert>
@@ -88,12 +72,9 @@
              <fileset dir="${python-src}">
                  <include name="**/*.py"/>
              </fileset>
--            <zipgroupfileset dir="lib">
+-            <zipgroupfileset dir="${lib}">
 -                <patternset refid="lib"/>
 -            </zipgroupfileset>
-             <zipgroupfileset dir="${target}/lib">
-                 <patternset refid="genlib"/>
-             </zipgroupfileset>
          </jar>
          <jar destfile="${floodlight-test-jar}" filesetmanifest="mergewithoutmain">
              <manifest>
@@ -102,9 +83,10 @@
              </manifest>
              <fileset dir="${build-test}"/>
          	<fileset dir="${resources}"/>
--            <zipgroupfileset dir="lib">
+-            <zipgroupfileset dir="${lib}">
 -                <patternset refid="lib-test"/>
+-                <patternset refid="lib-cobertura"/>
 -            </zipgroupfileset>
-             <zipgroupfileset dir="${target}/lib">
-                 <patternset refid="genlib"/>
-             </zipgroupfileset>
+         </jar>
+     </target>
+ 
