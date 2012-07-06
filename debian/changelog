@@ -1,3 +1,15 @@
+floodlight (0.85-0ubuntu1~ppa1) quantal; urgency=low
+
+  *  New upstream version.
+
+ -- Alex Reimers <alex@bigswitch.com>  Thu, 05 Jul 2012 18:35:26 -0700
+
+floodlight (0.82-0ubuntu1~ppa4) quantal; urgency=low
+
+  * Adding myself as maintainer. 
+
+ -- Alex Reimers <alex@bigswitch.com>  Thu, 05 Jul 2012 17:15:25 -0700
+
 floodlight (0.82-0ubuntu1~ppa3) quantal; urgency=low
 
   * Create and use the floodlight user and group.
