@@ -1,6 +1,6 @@
 --- a/build.xml
 +++ b/build.xml
-@@ -65,6 +65,9 @@
+@@ -64,6 +64,9 @@
          <include name="concurrentlinkedhashmap-lru.jar"/>
          <include name="jython.jar"/>
          <include name="thrift.jar"/>

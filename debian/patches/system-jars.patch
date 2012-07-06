@@ -1,8 +1,6 @@
-Index: ubuntu-packaging-floodlight/build.xml
-===================================================================
---- ubuntu-packaging-floodlight.orig/build.xml	2012-07-05 18:05:54.635139750 -0700
-+++ ubuntu-packaging-floodlight/build.xml	2012-07-05 18:18:04.875164082 -0700
-@@ -46,25 +46,25 @@
+--- a/build.xml
++++ b/build.xml
+@@ -46,24 +46,24 @@
      <property name="thrift.package" value="net/floodlightcontroller/packetstreamer/thrift"/>
      <property name="ant.build.javac.source" value="1.6"/>
      <property name="ant.build.javac.target" value="1.6"/>
@@ -25,7 +23,6 @@ Index: ubuntu-packaging-floodlight/build.xml
 -        <include name="concurrentlinkedhashmap-lru-1.2.jar"/>
 -        <include name="jython-2.5.2.jar"/>
 -        <include name="libthrift-0.7.0.jar"/>
--    </patternset>
 +        <include name="logback-classic.jar"/>
 +        <include name="logback-core.jar"/>
 +        <include name="jackson-core-asl.jar"/>
@@ -41,10 +38,9 @@ Index: ubuntu-packaging-floodlight/build.xml
 +        <include name="concurrentlinkedhashmap-lru.jar"/>
 +        <include name="jython.jar"/>
 +        <include name="thrift.jar"/>
-+	</patternset>
+     </patternset>
  
      <path id="classpath">
-         <fileset dir="${lib}">
 @@ -72,39 +72,10 @@
          </fileset>
      </path>

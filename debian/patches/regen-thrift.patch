@@ -1,7 +1,7 @@
 --- a/build.xml
 +++ b/build.xml
-@@ -109,7 +109,7 @@
-         <mkdir dir="${test-output}"/>
+@@ -81,7 +81,7 @@
+         <mkdir dir="${thrift.out.dir}"/>
      </target>
  
 -    <target name="compile" depends="init">
