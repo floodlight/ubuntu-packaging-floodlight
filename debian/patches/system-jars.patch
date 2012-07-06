@@ -1,5 +1,7 @@
---- a/build.xml
-+++ b/build.xml
+Index: ubuntu-packaging-floodlight/build.xml
+===================================================================
+--- ubuntu-packaging-floodlight.orig/build.xml	2012-07-05 18:05:54.635139750 -0700
++++ ubuntu-packaging-floodlight/build.xml	2012-07-05 18:18:04.875164082 -0700
 @@ -46,25 +46,25 @@
      <property name="thrift.package" value="net/floodlightcontroller/packetstreamer/thrift"/>
      <property name="ant.build.javac.source" value="1.6"/>
@@ -12,7 +14,6 @@
 -        <include name="logback-core-1.0.0.jar"/>
 -        <include name="jackson-core-asl-1.8.6.jar"/>
 -        <include name="jackson-mapper-asl-1.8.6.jar"/>
--        <include name="org.easymock_2.5.2.jar"/>
 -        <include name="slf4j-api-1.6.4.jar"/>
 -        <include name="org.restlet-2.1-RC1.jar"/>
 -        <include name="org.restlet.ext.jackson-2.1-RC1.jar"/>
@@ -24,11 +25,11 @@
 -        <include name="concurrentlinkedhashmap-lru-1.2.jar"/>
 -        <include name="jython-2.5.2.jar"/>
 -        <include name="libthrift-0.7.0.jar"/>
+-    </patternset>
 +        <include name="logback-classic.jar"/>
 +        <include name="logback-core.jar"/>
 +        <include name="jackson-core-asl.jar"/>
 +        <include name="jackson-mapper-asl.jar"/>
-+        <include name="easymock.jar"/>
 +        <include name="slf4j-api.jar"/>
 +        <include name="restlet.jar"/>
 +        <include name="restlet-jackson.jar"/>
@@ -40,26 +41,125 @@
 +        <include name="concurrentlinkedhashmap-lru.jar"/>
 +        <include name="jython.jar"/>
 +        <include name="thrift.jar"/>
-     </patternset>
++	</patternset>
  
      <path id="classpath">
-@@ -87,8 +87,8 @@
+         <fileset dir="${lib}">
+@@ -72,39 +72,10 @@
+         </fileset>
      </path>
  
-     <patternset id="lib-test">
+-    <patternset id="lib-cobertura">
+-        <include name="cobertura-1.9.4.1.jar"/>
+-        <include name="asm-3.0.jar"/>
+-        <include name="asm-tree-3.0.jar"/>
+-        <include name="oro/jakarta-oro-2.0.8.jar"/>
+-        <include name="log4j-1.2.9.jar"/>
+-    </patternset>
+-    <path id="classpath-cobertura">
+-        <fileset dir="${lib}">
+-            <patternset refid="lib-cobertura"/>
+-	</fileset>
+-    </path>
+-
+-    <patternset id="lib-test">
 -        <include name="junit-4.8.2.jar"/>
--        <include name="org.easymock_2.5.2.jar"/>
-+        <include name="junit4.jar"/>
-+        <include name="easymock.jar"/>
-     </patternset>
-     <path id="classpath-test">
-         <fileset dir="${lib}">
-@@ -204,30 +204,26 @@
-     <target name="coverage" depends="instrument,test,coverage-report"/>
+-        <include name="org.easymock-3.1.jar"/>
+-		<include name="objenesis-1.2.jar"/>  <!-- required by easymock to mock classes -->
+-		<include name="cglib-nodep-2.2.2.jar"/>    <!-- required by easymock to mock classes -->
+-    </patternset>
+-    <path id="classpath-test">
+-        <fileset dir="${lib}">
+-            <patternset refid="lib-test"/>
+-            <patternset refid="lib-cobertura"/>
+-            <patternset refid="lib"/>
+-        </fileset>
+-    </path>
+-
+     <target name="init">
+         <mkdir dir="${build}"/>
+-        <mkdir dir="${build-test}"/>
+         <mkdir dir="${target}/lib"/>
+         <mkdir dir="${thrift.out.dir}"/>
+-        <mkdir dir="${test-output}"/>
+     </target>
  
-     <target name="dist" depends="compile,compile-test">
-+        <pathconvert property="jars" refid="classpath"
-+            pathsep=" " dirsep="/">
+     <target name="compile" depends="init">
+@@ -116,16 +87,6 @@
+         </javac>
+     </target>
+ 
+-    <target name="compile-tests" depends="compile-test"/>
+-    <target name="compile-test" depends="compile">
+-    	<fileset dir="${resources}"/>
+-        <javac includeAntRuntime="false" debug="true" 
+-	       srcdir="${source-test}"
+-	       classpath="${build}"
+-	       classpathref="classpath-test"
+-	       destdir="${build-test}"/>
+-    </target>
+-
+     <!-- Thrift build based on http://www.flester.com/blog/2009/04/26/using-thrift-from-ant -->
+     <fileset id="thrift.files" dir="${thrift.dir}">
+         <include name="**/*.thrift"/>
+@@ -153,82 +114,19 @@
+         </java>
+     </target>
+ 
+-    <target name="tests" depends="test"/>
+-    <target name="test" depends="compile-test">
+-        <junit fork="true" forkmode="once"
+-	       failureproperty="junit.failure"
+-	       printsummary="on">
+-  	    <sysproperty key="net.sourceforge.cobertura.datafile"
+-			 file="${target}/cobertura.ser" />
+-            <classpath>
+-                <pathelement location="${build-coverage}"/>
+-                <pathelement location="${build}"/>
+-                <pathelement location="${build-test}"/>
+-                <path refid="classpath-test"/>
+-            </classpath>
+-            <formatter type="brief" usefile="true" />
+-            <batchtest todir="${test-output}">
+-                <fileset dir="${source-test}">
+-                    <exclude name="**/storage/tests/StorageTest.java"/>
+-                    <exclude name="**/test/Mock*"/>
+-                    <exclude name="**/core/test/**"/>
+-                </fileset>
+-            </batchtest>
+-        </junit>
+-        <fail if="junit.failure" message="Unit test(s) failed.  See reports!"/>
+-    </target>
+-
+-    <taskdef classpathref="classpath-cobertura" resource="tasks.properties"/>
+-    <target name="clean-instrument">
+-        <delete file="${target}/cobertura.ser"/>
+-        <delete dir="${build-coverage}"/>
+-    </target>
+-    <target name="instrument" depends="compile,compile-test,clean-instrument">
+-      <cobertura-instrument datafile="${target}/cobertura.ser"
+-			    todir="${build-coverage}"
+-			    classpathref="classpath-cobertura">
+-	<fileset dir="${build}">
+-	  <include name="**/*.class"/>
+-	</fileset>
+-      </cobertura-instrument>
+-    </target>
+-    <target name="coverage-report">
+-        <cobertura-report format="html"
+-			  datafile="${target}/cobertura.ser"
+-			  destdir="${coverage-output}"
+-			  srcdir="${source}"/>
+-        <cobertura-report format="xml"
+-			  datafile="${target}/cobertura.ser"
+-			  destdir="${coverage-output}"
+-			  srcdir="${source}"/>
+-    </target>
+-    <target name="coverage" depends="instrument,test,coverage-report"/>
+-
+-    <target name="dist" depends="compile,compile-test">
++    <target name="dist" depends="compile">
++        <pathconvert property="jars" refid="classpath" pathsep=" " dirsep="/">
 +        </pathconvert>
          <jar destfile="${floodlight-jar}" filesetmanifest="mergewithoutmain">
              <manifest>
@@ -75,14 +175,13 @@
 -            <zipgroupfileset dir="${lib}">
 -                <patternset refid="lib"/>
 -            </zipgroupfileset>
-         </jar>
-         <jar destfile="${floodlight-test-jar}" filesetmanifest="mergewithoutmain">
-             <manifest>
+-        </jar>
+-        <jar destfile="${floodlight-test-jar}" filesetmanifest="mergewithoutmain">
+-            <manifest>
 -                <attribute name="Class-Path" value="."/>
-+                <attribute name="Class-Path" value="${jars}"/>
-             </manifest>
-             <fileset dir="${build-test}"/>
-         	<fileset dir="${resources}"/>
+-            </manifest>
+-            <fileset dir="${build-test}"/>
+-        	<fileset dir="${resources}"/>
 -            <zipgroupfileset dir="${lib}">
 -                <patternset refid="lib-test"/>
 -                <patternset refid="lib-cobertura"/>
@@ -90,3 +189,22 @@
          </jar>
      </target>
  
+@@ -250,18 +148,4 @@
+             version="true"/>
+     </target>
+ 
+-    <target name="eclipse" depends="init">
+-        <pathconvert property="eclipse-lib">
+-            <map from="${basedir}/" to=""/>
+-            <fileset dir="${lib}">
+-                <patternset refid="lib"/>
+-                <patternset refid="lib-test"/>
+-            </fileset>
+-        </pathconvert>
+-        <exec executable="${basedir}/setup-eclipse.sh">
+-            <arg value="${main-class}"/>
+-            <arg value="${eclipse-lib}"/>
+-        </exec>
+-    </target>
+-
+ </project>
