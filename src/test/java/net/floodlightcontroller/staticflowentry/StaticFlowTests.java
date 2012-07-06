@@ -22,10 +22,10 @@ import org.openflow.util.HexString;
 
 
 import net.floodlightcontroller.core.FloodlightContext;
+import net.floodlightcontroller.core.IFloodlightProviderService.Role;
 import net.floodlightcontroller.core.IOFSwitch;
 import net.floodlightcontroller.core.module.FloodlightModuleContext;
 import net.floodlightcontroller.core.module.FloodlightModuleException;
-import net.floodlightcontroller.core.module.IFloodlightModule;
 import net.floodlightcontroller.core.test.MockFloodlightProvider;
 import net.floodlightcontroller.test.FloodlightTestCase;
 import net.floodlightcontroller.restserver.RestApiServer;
@@ -58,7 +58,7 @@ public class StaticFlowTests extends FloodlightTestCase {
         // setup actions
         List<OFAction> actions = new LinkedList<OFAction>();
         TestRule1.put(COLUMN_ACTIONS, "output=1");
-        actions.add(new OFActionOutput((short)1, (short) 0));
+        actions.add(new OFActionOutput((short)1, (short) Short.MAX_VALUE));
         // done
         FlowMod1.setMatch(match);
         FlowMod1.setActions(actions);
@@ -83,7 +83,7 @@ public class StaticFlowTests extends FloodlightTestCase {
         // setup actions
         List<OFAction> actions = new LinkedList<OFAction>();
         TestRule2.put(COLUMN_ACTIONS, "output=1");
-        actions.add(new OFActionOutput((short)1, (short) 0));
+        actions.add(new OFActionOutput((short)1, (short) Short.MAX_VALUE));
         // done
         FlowMod2.setMatch(match);
         FlowMod2.setActions(actions);
@@ -110,7 +110,7 @@ public class StaticFlowTests extends FloodlightTestCase {
         // setup actions
         TestRule3.put(COLUMN_ACTIONS, "output=controller");
         List<OFAction> actions = new LinkedList<OFAction>();
-        actions.add(new OFActionOutput(OFPort.OFPP_CONTROLLER.getValue(), (short) 0));
+        actions.add(new OFActionOutput(OFPort.OFPP_CONTROLLER.getValue(), (short) Short.MAX_VALUE));
         // done
         FlowMod3.setMatch(match);
         FlowMod3.setActions(actions);
@@ -179,7 +179,6 @@ public class StaticFlowTests extends FloodlightTestCase {
         staticFlowEntryPusher.setStorageSource(storage);
         
         FloodlightModuleContext fmc = new FloodlightModuleContext();
-        Set<IFloodlightModule> modSet = new HashSet<IFloodlightModule>();
         
         MockFloodlightProvider mockFloodlightProvider = getMockFloodlightProvider();
         Map<Long, IOFSwitch> switchMap = new HashMap<Long, IOFSwitch>();
@@ -188,8 +187,6 @@ public class StaticFlowTests extends FloodlightTestCase {
         mockFloodlightProvider.setSwitches(switchMap);
         staticFlowEntryPusher.setFloodlightProvider(mockFloodlightProvider);
         RestApiServer restApi = new RestApiServer();
-        modSet.add(restApi);
-        fmc.createConfigMaps(modSet);
         try {
             restApi.init(fmc);
         } catch (FloodlightModuleException e) {
@@ -296,5 +293,42 @@ public class StaticFlowTests extends FloodlightTestCase {
         storage.insertRow(StaticFlowEntryPusher.TABLE_NAME, TestRule3);
 
         return storage;
+    }
+    
+    @Test 
+    public void testHARoleChanged() throws IOException {
+        StaticFlowEntryPusher staticFlowEntryPusher = new StaticFlowEntryPusher();
+        IStorageSourceService storage = createStorageWithFlowEntries();
+        MockFloodlightProvider mfp = getMockFloodlightProvider();
+        staticFlowEntryPusher.setFloodlightProvider(mfp);
+        staticFlowEntryPusher.setStorageSource(storage);
+        RestApiServer restApi = new RestApiServer();
+        try {
+            FloodlightModuleContext fmc = new FloodlightModuleContext();
+            restApi.init(fmc);
+        } catch (FloodlightModuleException e) {
+            e.printStackTrace();
+        }
+        staticFlowEntryPusher.restApi = restApi;
+        staticFlowEntryPusher.startUp(null);    // again, to hack unittest
+        
+        assert(staticFlowEntryPusher.entry2dpid.containsValue(TestSwitch1DPID));
+        assert(staticFlowEntryPusher.entriesFromStorage.containsValue(FlowMod1));
+        assert(staticFlowEntryPusher.entriesFromStorage.containsValue(FlowMod2));
+        assert(staticFlowEntryPusher.entriesFromStorage.containsValue(FlowMod3));
+        
+        // Send a notification that we've changed to slave
+        mfp.dispatchRoleChanged(null, Role.SLAVE);
+        // Make sure we've removed all our entries
+        assert(staticFlowEntryPusher.entry2dpid.isEmpty());
+        assert(staticFlowEntryPusher.entriesFromStorage.isEmpty());
+        
+        // Send a notification that we've changed to master
+        mfp.dispatchRoleChanged(Role.SLAVE, Role.MASTER);  
+        // Make sure we've learned the entries
+        assert(staticFlowEntryPusher.entry2dpid.containsValue(TestSwitch1DPID));
+        assert(staticFlowEntryPusher.entriesFromStorage.containsValue(FlowMod1));
+        assert(staticFlowEntryPusher.entriesFromStorage.containsValue(FlowMod2));
+        assert(staticFlowEntryPusher.entriesFromStorage.containsValue(FlowMod3));
     }
 }

@@ -44,7 +44,15 @@ public interface ILinkDiscoveryService extends IFloodlightService {
      * @return linkTuple
      */
     public LinkInfo getLinkInfo(SwitchPortTuple idPort, boolean isSrcPort);
-    
+
+    /**
+     * Get the link type of the link tuple based on link info.
+     * @param linkTuple
+     * @param linkInfo
+     * @return linkType
+     */
+    public ILinkDiscovery.LinkType getLinkType(LinkTuple lt, LinkInfo info);
+
     /**
      * Retrieves a map of all known link connections between OpenFlow switches
      * and the associated info (valid time, port states) for the link.
@@ -63,4 +71,24 @@ public interface ILinkDiscoveryService extends IFloodlightService {
      * @param listener The listener that wants the notifications
      */
     public void addListener(ILinkDiscoveryListener listener);
+    
+    /**
+     * Retrieves a set of all switch ports on which lldps are suppressed.
+     * @return
+     */
+    public Set<SwitchPortTuple> getSuppressLLDPsInfo();
+    
+    /**
+     * Adds a switch port to suppress lldp set
+     * @param sw
+     * @param port
+     */
+    public void AddToSuppressLLDPs(IOFSwitch sw, short port);
+    
+    /**
+     * Removes a switch port from suppress lldp set
+     * @param sw
+     * @param port
+     */
+    public void RemoveFromSuppressLLDPs(IOFSwitch sw, short port);
 }

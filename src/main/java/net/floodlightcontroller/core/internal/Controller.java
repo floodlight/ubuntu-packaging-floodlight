@@ -24,9 +24,11 @@ import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.util.ArrayList;
 import java.nio.channels.ClosedChannelException;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -43,16 +45,15 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import net.floodlightcontroller.core.FloodlightContext;
 import net.floodlightcontroller.core.IFloodlightProviderService;
+import net.floodlightcontroller.core.IHAListener;
 import net.floodlightcontroller.core.IInfoProvider;
-import net.floodlightcontroller.core.IOFController;
 import net.floodlightcontroller.core.IOFMessageListener;
-import net.floodlightcontroller.core.IOFMessageListener.Command;
+import net.floodlightcontroller.core.IListener.Command;
 import net.floodlightcontroller.core.IOFSwitch;
 import net.floodlightcontroller.core.IOFSwitchFilter;
 import net.floodlightcontroller.core.IOFSwitchListener;
@@ -64,9 +65,11 @@ import net.floodlightcontroller.packet.Ethernet;
 import net.floodlightcontroller.perfmon.IPktInProcessingTimeService;
 import net.floodlightcontroller.restserver.IRestApiService;
 import net.floodlightcontroller.storage.IResultSet;
+import net.floodlightcontroller.storage.IStorageSourceListener;
 import net.floodlightcontroller.storage.IStorageSourceService;
 import net.floodlightcontroller.storage.OperatorPredicate;
 import net.floodlightcontroller.storage.StorageException;
+import net.floodlightcontroller.threadpool.IThreadPoolService;
 
 import org.jboss.netty.bootstrap.ServerBootstrap;
 import org.jboss.netty.buffer.ChannelBuffer;
@@ -128,44 +131,57 @@ import org.slf4j.LoggerFactory;
 /**
  * The main controller class.  Handles all setup and network listeners
  */
-public class Controller
-    implements IFloodlightProviderService, IOFController {
+public class Controller implements IFloodlightProviderService, 
+            IStorageSourceListener {
     
     protected static Logger log = LoggerFactory.getLogger(Controller.class);
-    protected ICounterStoreService counterStore = null;
     
     protected BasicFactory factory;
-    protected ConcurrentMap<OFType, 
-                            ListenerDispatcher<OFType, 
-                                               IOFMessageListener>> messageListeners;
+    protected ConcurrentMap<OFType,
+                            ListenerDispatcher<OFType,IOFMessageListener>> 
+                                messageListeners;
     // The activeSwitches map contains only those switches that are actively
     // being controlled by us -- it doesn't contain switches that are
     // in the slave role
     protected ConcurrentHashMap<Long, IOFSwitch> activeSwitches;
     // connectedSwitches contains all connected switches, including ones where
     // we're a slave controller. We need to keep track of them so that we can
-    // send role request messages to the switches when our role changes to master
-    protected ConcurrentHashMap<Long, IOFSwitch> connectedSwitches;
+    // send role request messages to switches when our role changes to master
+    // We add a switch to this set after it successfully completes the
+    // handshake. Access to this Set needs to be synchronized with roleChanger
+    protected HashSet<OFSwitchImpl> connectedSwitches;
+    
+    // The controllerNodeIPsCache maps Controller IDs to their IP address. 
+    // It's only used by handleControllerNodeIPsChanged
+    protected HashMap<String, String> controllerNodeIPsCache;
     
     protected Set<IOFSwitchListener> switchListeners;
+    protected Set<IHAListener> haListeners;
     protected Map<String, List<IInfoProvider>> providerMap;
-    protected BlockingQueue<Update> updates;
-    protected IRestApiService restApi;
-
-    protected ScheduledExecutorService executor = 
-            Executors.newScheduledThreadPool(5);
+    protected BlockingQueue<IUpdate> updates;
     
+    // Module dependencies
+    protected IRestApiService restApi;
+    protected ICounterStoreService counterStore = null;
     protected IStorageSourceService storageSource;
     protected IPktInProcessingTimeService pktinProcTime;
+    protected IThreadPoolService threadPool;
     
     // Configuration options
     protected int openFlowPort = 6633;
-    protected long ptWarningThresholdInNano;
     protected int workerThreads = 0;
+    // The id for this controller node. Should be unique for each controller
+    // node in a controller cluster.
+    protected String controllerId = "localhost";
     
     // The current role of the controller.
     // If the controller isn't configured to support roles, then this is null.
     protected Role role;
+    // A helper that handles sending and timeout handling for role requests
+    protected RoleChanger roleChanger;
+    
+    // Start time of the controller
+    protected long systemStartTime;
     
     // Storage table names
     protected static final String CONTROLLER_TABLE_NAME = "controller_controller";
@@ -177,12 +193,14 @@ public class Controller
     protected static final String SWITCH_IP = "ip";
     protected static final String SWITCH_CONTROLLER_ID = "controller_id";
     protected static final String SWITCH_ACTIVE = "active";
-    protected static final String SWITCH_CORE_SWITCH = "core_switch";
     protected static final String SWITCH_CONNECTED_SINCE = "connected_since";
     protected static final String SWITCH_CAPABILITIES = "capabilities";
     protected static final String SWITCH_BUFFERS = "buffers";
     protected static final String SWITCH_TABLES = "tables";
     protected static final String SWITCH_ACTIONS = "actions";
+
+    protected static final String SWITCH_CONFIG_TABLE_NAME = "controller_switchconfig";
+    protected static final String SWITCH_CONFIG_CORE_SWITCH = "core_switch";
     
     protected static final String PORT_TABLE_NAME = "controller_port";
     protected static final String PORT_ID = "id";
@@ -197,18 +215,108 @@ public class Controller
     protected static final String PORT_SUPPORTED_FEATURES = "supported_features";
     protected static final String PORT_PEER_FEATURES = "peer_features";
     
+    protected static final String CONTROLLER_INTERFACE_TABLE_NAME = "controller_controllerinterface";
+    protected static final String CONTROLLER_INTERFACE_ID = "id";
+    protected static final String CONTROLLER_INTERFACE_CONTROLLER_ID = "controller_id";
+    protected static final String CONTROLLER_INTERFACE_TYPE = "type";
+    protected static final String CONTROLLER_INTERFACE_NUMBER = "number";
+    protected static final String CONTROLLER_INTERFACE_DISCOVERED_IP = "discovered_ip";
+    
+    
+    
     // Perf. related configuration
     protected static final int SEND_BUFFER_SIZE = 4 * 1024 * 1024;
     protected static final int BATCH_MAX_SIZE = 100;
     protected static final boolean ALWAYS_DECODE_ETH = true;
 
-    protected class Update {
+    /**
+     *  Updates handled by the main loop 
+     */
+    protected interface IUpdate {
+        /** 
+         * Calls the appropriate listeners
+         */
+        public void dispatch();
+    }
+    /**
+     * Update message indicating a switch was added or removed 
+     */
+    protected class SwitchUpdate implements IUpdate {
         public IOFSwitch sw;
         public boolean added;
-
-        public Update(IOFSwitch sw, boolean added) {
+        public SwitchUpdate(IOFSwitch sw, boolean added) {
             this.sw = sw;
             this.added = added;
+        }
+        public void dispatch() {
+            if (log.isDebugEnabled()) {
+                log.debug("Dispatching switch update {} {}",
+                        sw, added);
+            }
+            if (switchListeners != null) {
+                for (IOFSwitchListener listener : switchListeners) {
+                    if (added)
+                        listener.addedSwitch(sw);
+                    else
+                        listener.removedSwitch(sw);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Update message indicating controller's role has changed
+     */
+    protected class HARoleUpdate implements IUpdate {
+        public Role oldRole;
+        public Role newRole;
+        public HARoleUpdate(Role newRole, Role oldRole) {
+            this.oldRole = oldRole;
+            this.newRole = newRole;
+        }
+        public void dispatch() {
+            if (log.isDebugEnabled()) {
+                log.debug("Dispatching HA Role update newRole = {}, oldRole = {}",
+                          newRole, oldRole);
+            }
+            if (haListeners != null) {
+                for (IHAListener listener : haListeners) {
+                        listener.roleChanged(oldRole, newRole);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Update message indicating
+     * IPs of controllers in controller cluster have changed.
+     */
+    protected class HAControllerNodeIPUpdate implements IUpdate {
+        public Map<String,String> curControllerNodeIPs;
+        public Map<String,String> addedControllerNodeIPs;
+        public Map<String,String> removedControllerNodeIPs;
+        public HAControllerNodeIPUpdate(
+                HashMap<String,String> curControllerNodeIPs,  
+                HashMap<String,String> addedControllerNodeIPs,  
+                HashMap<String,String> removedControllerNodeIPs) {
+            this.curControllerNodeIPs = curControllerNodeIPs;
+            this.addedControllerNodeIPs = addedControllerNodeIPs;
+            this.removedControllerNodeIPs = removedControllerNodeIPs;
+        }
+        public void dispatch() {
+            if (log.isDebugEnabled()) {
+                log.debug("Dispatching HA Controller Node IP update "
+                        + "curIPs = {}, addedIPs = {}, removedIPs = {}",
+                        new Object[] { curControllerNodeIPs, addedControllerNodeIPs,
+                            removedControllerNodeIPs }
+                        );
+            }
+            if (haListeners != null) {
+                for (IHAListener listener: haListeners) {
+                    listener.controllerNodeIPsChanged(curControllerNodeIPs,
+                            addedControllerNodeIPs, removedControllerNodeIPs);
+                }
+            }
         }
     }
     
@@ -231,89 +339,50 @@ public class Controller
     public void setRestApiService(IRestApiService restApi) {
         this.restApi = restApi;
     }
+    
+    public void setThreadPoolService(IThreadPoolService tp) {
+        this.threadPool = tp;
+    }
 
     @Override
-    public synchronized Role getRole() {
-        return role;
+    public Role getRole() {
+        synchronized(roleChanger) {
+            return role;
+        }
     }
     
     @Override
-    public synchronized void setRole(Role role) {
-        this.role = role;
+    public void setRole(Role role) {
+        if (role == null) throw new NullPointerException("Role can not be null.");
         
-        // Send role request messages to all of the connected switches.
-        // FIXME: Should maybe handle this in an asynchronous task.
-        for (IOFSwitch sw: connectedSwitches.values()) {
+        // Need to synchronize to ensure a reliable ordering on role request
+        // messages send and to ensure the list of connected switches is stable
+        // RoleChanger will handle the actual sending of the message and 
+        // timeout handling
+        // @see RoleChanger
+        synchronized(roleChanger) {
+            if (role.equals(this.role)) {
+                log.debug("Ignoring role change: role is already {}", role);
+                return;
+            }
+
+            Role oldRole = this.role;
+            this.role = role;
+            
+            log.debug("Submitting role change request to role {}", role);
+            roleChanger.submitRequest(connectedSwitches, role);
+            
+            // Enqueue an update for our listeners.
             try {
-                sendRoleRequest(sw, role);
-            }
-            catch (IOException exc) {
-                // FIXME: What's the right thing to do in this case?
-                // Should we try to send it again later?
-                // Terminate the switch connection?
-                log.error("Error sending role request message to switch {}", sw);
+                this.updates.put(new HARoleUpdate(role, oldRole));
+            } catch (InterruptedException e) {
+                log.error("Failure adding update to queue", e);
             }
         }
     }
     
-    /**
-     * Send a NX role request message to the switch requesting the specified role.
-     * @param sw switch to send the role request message to
-     * @param role role to request
-     * @return transaction id of the role request message that was sent
-     */
-    protected int sendNxRoleRequest(IOFSwitch sw, Role role)
-            throws IOException {
-        // Convert the role enum to the appropriate integer constant used
-        // in the NX role request message
-        int nxRole = 0;
-        switch (role) {
-            case EQUAL:
-                nxRole = OFRoleVendorData.NX_ROLE_OTHER;
-                break;
-            case MASTER:
-                nxRole = OFRoleVendorData.NX_ROLE_MASTER;
-                break;
-            case SLAVE:
-                nxRole = OFRoleVendorData.NX_ROLE_SLAVE;
-                break;
-            default:
-                assert false;
-        }
-        
-        // Construct the role request message
-        OFVendor roleRequest = (OFVendor)factory.getMessage(OFType.VENDOR);
-        int xid = sw.getNextTransactionId();
-        roleRequest.setXid(xid);
-        roleRequest.setVendor(OFNiciraVendorData.NX_VENDOR_ID);
-        OFRoleRequestVendorData roleRequestData = new OFRoleRequestVendorData();
-        roleRequestData.setRole(nxRole);
-        roleRequest.setVendorData(roleRequestData);
-        roleRequest.setLengthU(OFVendor.MINIMUM_LENGTH + roleRequestData.getLength());
-        
-        // Send it to the switch
-        sw.write(roleRequest, null);
-
-        return xid;
-    }
     
-    /**
-     * Send a role request message to the switch. This checks the capabilities of
-     * the switch for which, if any, role request messages it understands and sends
-     * the appropriate one. Currently we only support the OVS-style role request
-     * message, but once the controller support OF 1.2 this function will also
-     * handling sending out the OF 1.2-style role request message.
-     * @param sw the switch to send the role request to
-     * @param role the role to request
-     * @throws IOException
-     */
-    protected void sendRoleRequest(IOFSwitch sw, Role role) throws IOException {
-        Boolean supportsNxRole = (Boolean)
-                sw.getAttribute(IOFSwitch.SWITCH_SUPPORTS_NX_ROLE);
-        if ((supportsNxRole != null) && supportsNxRole) {
-            sendNxRoleRequest(sw, role);
-        }
-    }
+    
     // **********************
     // ChannelUpstreamHandler
     // **********************
@@ -350,6 +419,7 @@ public class Controller
             sw = new OFSwitchImpl();
             sw.setChannel(e.getChannel());
             sw.setFloodlightProvider(Controller.this);
+            sw.setThreadPoolService(threadPool);
             
             List<OFMessage> msglist = new ArrayList<OFMessage>(1);
             msglist.add(factory.getMessage(OFType.HELLO));
@@ -361,9 +431,15 @@ public class Controller
         public void channelDisconnected(ChannelHandlerContext ctx,
                                         ChannelStateEvent e) throws Exception {
             if (sw != null && state.hsState == HandshakeState.READY) {
-                if (sw.getRole() != Role.SLAVE)
+                if (activeSwitches.containsKey(sw.getId())) {
+                    // It's safe to call removeSwitch even though the map might
+                    // not contain this particular switch but another with the 
+                    // same DPID
                     removeSwitch(sw);
-                connectedSwitches.remove(sw.getId());
+                }
+                synchronized(roleChanger) {
+                    connectedSwitches.remove(sw);
+                }
                 sw.setConnected(false);
             }
             log.info("Disconnected switch {}", sw);
@@ -404,6 +480,7 @@ public class Controller
             } else {
                 log.error("Error while processing message from switch " + sw,
                           e.getCause());
+                ctx.getChannel().close();
             }
         }
 
@@ -427,8 +504,9 @@ public class Controller
                         processOFMessage(ofm);
                     }
                     catch (Exception ex) {
-                        // We are the last handler in the stream, so run the exception
-                        // through the channel again by passing in ctx.getChannel().
+                        // We are the last handler in the stream, so run the 
+                        // exception through the channel again by passing in 
+                        // ctx.getChannel().
                         Channels.fireExceptionCaught(ctx.getChannel(), ex);
                     }
                 }
@@ -471,20 +549,20 @@ public class Controller
                     try {
                         String swid = sw.getStringId();
                         resultSet = 
-                                storageSource.getRow(SWITCH_TABLE_NAME, swid);
+                                storageSource.getRow(SWITCH_CONFIG_TABLE_NAME, swid);
                         for (Iterator<IResultSet> it = 
                                 resultSet.iterator(); it.hasNext();) {
                             // In case of multiple rows, use the status
                             // in last row?
                             Map<String, Object> row = it.next().getRow();
-                            if (row.containsKey(SWITCH_CORE_SWITCH)) {
+                            if (row.containsKey(SWITCH_CONFIG_CORE_SWITCH)) {
                                 if (log.isDebugEnabled()) {
                                     log.debug("Reading SWITCH_IS_CORE_SWITCH " + 
                                               "config for switch={}, is-core={}",
-                                              sw, row.get(SWITCH_CORE_SWITCH));
+                                              sw, row.get(SWITCH_CONFIG_CORE_SWITCH));
                                 }
                                 String ics = 
-                                        (String)row.get(SWITCH_CORE_SWITCH);
+                                        (String)row.get(SWITCH_CONFIG_CORE_SWITCH);
                                 is_core_switch = ics.equals("true");
                             }
                         }
@@ -547,80 +625,68 @@ public class Controller
             sw.setAttribute(IOFSwitch.SWITCH_DESCRIPTION_FUTURE,
                     dfuture);
 
-            // We need to keep track of all of the switches that are connected
-            // to the controller, in any role, so that we can later send the role
-            // request messages when the controller role changes.
-            connectedSwitches.put(sw.getId(), sw);
-            
-            // Send a role request if role support is enabled for the controller
-            // This is a probe that we'll use to determine if the switch actually
-            // supports the role request message. If it does we'll get back a
-            // role reply message. If it doesn't we'll get back an OFError message.
-            if (role != null) {
-                state.nxRoleRequestXid = sendNxRoleRequest(sw, role);
-            } else {
-                // The hasNxRole field is just a flag that's checked before advancing
-                // the handshake state to READY. In this case, if role support isn't
-                // enabled for the controller, then we're not sending the role request
-                // probe to the switch so we don't need to wait for a reply/error
-                // before transitioning to the READY state.
-                state.hasNxRoleReply = true;
-            }
         }
         
         protected void checkSwitchReady() {
-            if (state.hasDescription && state.hasGetConfigReply && state.hasNxRoleReply) {
+            if (state.hsState == HandshakeState.FEATURES_REPLY &&
+                    state.hasDescription && state.hasGetConfigReply) {
                 
                 state.hsState = HandshakeState.READY;
                 
-                if (getRole() == Role.SLAVE && sw.getRole() == null) {
-                    // What should we do if the controller is currently in the slave
-                    // role and the switch doesn't understand the role request message?
-                    // Should we allow connections from the switch? Probably not.
-                    // They'll just start sending messages to the controller that it's
-                    // going to drop since it's the slave, so it probably makes more
-                    // sense to drop the connection pro-actively in that case. That's
-                    // still not great either, because the switch will probably try to
-                    // reconnect repeatedly (hopefully with some sort of exponential
-                    // backoff), but that seems preferable to having the controller just
-                    // silently drop the messages from the switch. This case is really
-                    // a configuration problem that should be reported to the user.
-                    log.error("Disconnecting switch {} that doesn't support role " +
-                            "request messages from a slave controller");
-                    sw.setConnected(false);
-                    connectedSwitches.remove(sw.getId());
-                    sw.getChannel().close();
-                } else {
-                    log.info("Switch handshake successful: {}", sw);
+                synchronized(roleChanger) {
+                    // We need to keep track of all of the switches that are connected
+                    // to the controller, in any role, so that we can later send the 
+                    // role request messages when the controller role changes.
+                    // We need to be synchronized while doing this: we must not 
+                    // send a another role request to the connectedSwitches until
+                    // we were able to add this new switch to connectedSwitches 
+                    // *and* send the current role to the new switch.
+                    connectedSwitches.add(sw);
                     
-                    if (sw.getRole() != Role.SLAVE) {
-                        // Only add the switch to the active switch list if we're not in the slave role.
-                        // Note that if the role attribute is null, then that means that
-                        // the switch doesn't support the role request messages, so in that
-                        // case we're effectively in the EQUAL role and the switch should be
-                        // included in the active switch list.
-                        addSwitch(sw);
-                    
-                        // Delete all preexisting flows for new connections to the master
-                        // FIXME: Need to think more about what the test should be for when
-                        // we flush the flow cache? For example, if all the controllers are
-                        // temporarily in the backup role (e.g. right after a failure of the
-                        // master controller) at the point the switch connects, then all of
-                        // the controllers will initially connect as backup controllers and
-                        // not flush the flow cache. Then when one of them is promoted to
-                        // master following the master controller election the flow cache
-                        // will still not be flushed because that's treated as a failover
-                        // event where we don't want to flush the flow cache. The end result
-                        // would be that the flow cache for a newly connected switch is never
-                        // flushed. Not sure how to handle that case though...
+                    if (role != null) {
+                        // Send a role request if role support is enabled for the controller
+                        // This is a probe that we'll use to determine if the switch
+                        // actually supports the role request message. If it does we'll
+                        // get back a role reply message. If it doesn't we'll get back an
+                        // OFError message. 
+                        // If role is MASTER we will promote switch to active
+                        // list when we receive the switch's role reply messages
+                        log.debug("This controller's role is {}, " + 
+                        		"sending initial role request msg to {}",
+                                role, sw);
+                        Collection<OFSwitchImpl> swList = new ArrayList<OFSwitchImpl>(1);
+                        swList.add(sw);
+                        roleChanger.submitRequest(swList, role);
+                    } 
+                    else {
+                        // Role supported not enabled on controller (for now)
+                        // automatically promote switch to active state. 
+                        log.debug("This controller's role is null, " + 
+                        		"not sending role request msg to {}",
+                                role, sw);
+                        // Need to clear FlowMods before we add the switch
+                        // and dispatch updates otherwise we have a race condition.
                         sw.clearAllFlowMods();
+                        addSwitch(sw);
+                        state.firstRoleReplyReceived = true;
                     }
                 }
             }
         }
-        
+                
+        /* Handle a role reply message we received from the switch. Since
+         * netty serializes message dispatch we don't need to synchronize 
+         * against other receive operations from the same switch, so no need
+         * to synchronize addSwitch(), removeSwitch() operations from the same
+         * connection. 
+         * FIXME: However, when a switch with the same DPID connects we do
+         * need some synchronization. However, handling switches with same
+         * DPID needs to be revisited anyways (get rid of r/w-lock and synchronous
+         * removedSwitch notification):1
+         * 
+         */
         protected void handleRoleReplyMessage(OFVendor vendorMessage,
-                                              OFRoleReplyVendorData roleReplyVendorData) {
+                                    OFRoleReplyVendorData roleReplyVendorData) {
             // Map from the role code in the message to our role enum
             int nxRole = roleReplyVendorData.getRole();
             Role role = null;
@@ -636,38 +702,74 @@ public class Controller
                     break;
                 default:
                     log.error("Invalid role value in role reply message");
-                    break;
+                    sw.getChannel().close();
+                    return;
             }
             
-            log.info("Received NX role reply message; setting role of controller to {}", role.name());
+            log.debug("Handling role reply for role {} from {}. " +
+                      "Controller's role is {} ", 
+                      new Object[] { role, sw, Controller.this.role} 
+                      );
             
-            sw.setRole(role);
+            sw.deliverRoleReply(vendorMessage.getXid(), role);
             
-            if (state.hsState == HandshakeState.FEATURES_REPLY) {
-                sw.setAttribute(IOFSwitch.SWITCH_SUPPORTS_NX_ROLE, true);
-                state.hasNxRoleReply = true;
-                checkSwitchReady();
-            } else if (state.hsState == HandshakeState.READY) {
-                // FIXME: Need to think more about possible synchronization issues here.
-                boolean isActive = activeSwitches.containsKey(sw.getId());
-                String roleName = (role != null) ? role.name() : "none";
-                log.debug("Handling role reply; switch is {}; role = {}",
-                          new Object[] {isActive ? "active" : "inactive", roleName});
-                if (role == Role.SLAVE) {
-                    if (isActive) {
-                        removeSwitch(sw);
-                        log.debug("Removed slave switch {} from active switch list",
-                                 HexString.toHexString(sw.getId()));
-                    }
-                } else if (!isActive) {
-                    addSwitch(sw);
-                    log.debug("Added master switch {} to active switch list",
+            boolean isActive = activeSwitches.containsKey(sw.getId());
+            if (!isActive && sw.isActive()) {
+                // Transition from SLAVE to MASTER.
+                
+                // Some switches don't seem to update us with port
+                // status messages while in slave role.
+                readSwitchPortStateFromStorage(sw);                
+                // Only add the switch to the active switch list if 
+                // we're not in the slave role. Note that if the role 
+                // attribute is null, then that means that the switch 
+                // doesn't support the role request messages, so in that
+                // case we're effectively in the EQUAL role and the 
+                // switch should be included in the active switch list.
+                addSwitch(sw);
+                log.debug("Added master switch {} to active switch list",
+                         HexString.toHexString(sw.getId()));
+                    
+                if (!state.firstRoleReplyReceived) {
+                    // This is the first role-reply message we receive from
+                    // this switch or roles were disabled when the switch
+                    // connected: 
+                    // Delete all pre-existing flows for new connections to 
+                    // the master
+                    //
+                    // FIXME: Need to think more about what the test should 
+                    // be for when we flush the flow-table? For example, 
+                    // if all the controllers are temporarily in the backup 
+                    // role (e.g. right after a failure of the master 
+                    // controller) at the point the switch connects, then 
+                    // all of the controllers will initially connect as 
+                    // backup controllers and not flush the flow-table. 
+                    // Then when one of them is promoted to master following
+                    // the master controller election the flow-table
+                    // will still not be flushed because that's treated as 
+                    // a failover event where we don't want to flush the 
+                    // flow-table. The end result would be that the flow 
+                    // table for a newly connected switch is never
+                    // flushed. Not sure how to handle that case though...
+                    sw.clearAllFlowMods();
+                    log.debug("First role reply from master switch {}, " +
+                              "clear FlowTable to active switch list",
                              HexString.toHexString(sw.getId()));
                 }
+            } 
+            else if (isActive && !sw.isActive()) {
+                // Transition from MASTER to SLAVE: remove switch 
+                // from active switch list. 
+                log.debug("Removed slave switch {} from active switch" +
+                          " list", HexString.toHexString(sw.getId()));
+                removeSwitch(sw);
             }
+            
+            // Indicate that we have received a role reply message. 
+            state.firstRoleReplyReceived = true;
         }
-        
-        protected boolean handleVendorMessage(OFVendor vendorMessage) {
+
+		protected boolean handleVendorMessage(OFVendor vendorMessage) {
             boolean shouldHandleMessage = false;
             int vendor = vendorMessage.getVendor();
             switch (vendor) {
@@ -679,10 +781,12 @@ public class Controller
                         case OFRoleReplyVendorData.NXT_ROLE_REPLY:
                             OFRoleReplyVendorData roleReplyVendorData =
                                     (OFRoleReplyVendorData) niciraVendorData;
-                            handleRoleReplyMessage(vendorMessage, roleReplyVendorData);
+                            handleRoleReplyMessage(vendorMessage, 
+                                                   roleReplyVendorData);
                             break;
                         default:
-                            log.warn("Unhandled Nicira VENDOR message; data type = {}", dataType);
+                            log.warn("Unhandled Nicira VENDOR message; " +
+                                     "data type = {}", dataType);
                             break;
                     }
                     break;
@@ -712,7 +816,8 @@ public class Controller
                         state.hsState = HandshakeState.HELLO;
                         sendHelloConfiguration();
                     } else {
-                        throw new SwitchStateException("Unexpected HELLO from " + sw);
+                        throw new SwitchStateException("Unexpected HELLO from " 
+                                                       + sw);
                     }
                     break;
                 case ECHO_REQUEST:
@@ -758,33 +863,84 @@ public class Controller
                     shouldHandleMessage = handleVendorMessage((OFVendor)m);
                     break;
                 case ERROR:
+                    // TODO: we need better error handling. Especially for 
+                    // request/reply style message (stats, roles) we should have
+                    // a unified way to lookup the xid in the error message. 
+                    // This will probable involve rewriting the way we handle
+                    // request/reply style messages.
                     OFError error = (OFError) m;
                     boolean shouldLogError = true;
-                    if (state.hsState == HandshakeState.FEATURES_REPLY) {
-                        if (error.getXid() == state.nxRoleRequestXid) {
-                            boolean isBadVendorError =
-                                (error.getErrorType() == OFError.OFErrorType.OFPET_BAD_REQUEST.getValue()) &&
-                                (error.getErrorCode() == OFError.OFBadRequestCode.OFPBRC_BAD_VENDOR.ordinal());
-                            // We expect to receive a bad vendor error when we're connected to a switch that
-                            // doesn't support the Nicira vendor extensions (i.e. not OVS or derived from OVS).
-                            // So that's not a real error case and we don't want to log those spurious errors.
-                            shouldLogError = !isBadVendorError;
-                            
-                            // FIXME: Is this the right thing to do if we receive some other error
-                            // besides a bad vendor error? Presumably that means the switch did actually
-                            // understand the role request message, but there was some other error
-                            // from processing the message. OF 1.2 specifies a OFPET_ROLE_REQUEST_FAILED
-                            // error code, but it doesn't look like the Nicira role request has that.
-                            // Should check OVS source code to see if it's possible for any other errors
-                            // to be returned.
-                            sw.setAttribute(IOFSwitch.SWITCH_SUPPORTS_NX_ROLE, !isBadVendorError);
-                            state.hasNxRoleReply = true;
-                            checkSwitchReady();
+                    // TODO: should we check that firstRoleReplyReceived is false,
+                    // i.e., check only whether the first request fails?
+                    if (sw.checkFirstPendingRoleRequestXid(error.getXid())) {
+                        boolean isBadVendorError =
+                            (error.getErrorType() == OFError.OFErrorType.
+                                    OFPET_BAD_REQUEST.getValue()) &&
+                            (error.getErrorCode() == OFError.
+                                    OFBadRequestCode.
+                                        OFPBRC_BAD_VENDOR.ordinal());
+                        // We expect to receive a bad vendor error when 
+                        // we're connected to a switch that doesn't support 
+                        // the Nicira vendor extensions (i.e. not OVS or 
+                        // derived from OVS). So that's not a real error 
+                        // case and we don't want to log those spurious errors.
+                        shouldLogError = !isBadVendorError;
+                        if (isBadVendorError) {
+                            if (!state.firstRoleReplyReceived) {
+                                log.warn("Received ERROR from sw {} that "
+                                          +"indicates roles are not supported "
+                                          +"but we have received a valid "
+                                          +"role reply earlier", sw);
+                            }
+                            state.firstRoleReplyReceived = true;
+                            sw.deliverRoleRequestNotSupported(error.getXid());
+                            synchronized(roleChanger) {
+                                if (sw.role == null && Controller.this.role==Role.SLAVE) {
+                                    // the switch doesn't understand role request
+                                    // messages and the current controller role is
+                                    // slave. We need to disconnect the switch. 
+                                    // @see RoleChanger for rationale
+                                    sw.getChannel().close();
+                                }
+                                else if (sw.role == null) {
+                                    // Controller's role is master: add to
+                                    // active 
+                                    // TODO: check if clearing flow table is
+                                    // right choice here.
+                                    // Need to clear FlowMods before we add the switch
+                                    // and dispatch updates otherwise we have a race condition.
+                                    // TODO: switch update is async. Won't we still have a potential
+                                    //       race condition? 
+                                    sw.clearAllFlowMods();
+                                    addSwitch(sw);
+                                }
+                            }
                         }
-                        // Once we support OF 1.2, we'd add code to handle it here.
-                        //if (error.getXid() == state.ofRoleRequestXid) {
-                        //}
+                        else {
+                            // TODO: Is this the right thing to do if we receive
+                            // some other error besides a bad vendor error? 
+                            // Presumably that means the switch did actually
+                            // understand the role request message, but there 
+                            // was some other error from processing the message.
+                            // OF 1.2 specifies a OFPET_ROLE_REQUEST_FAILED
+                            // error code, but it doesn't look like the Nicira 
+                            // role request has that. Should check OVS source 
+                            // code to see if it's possible for any other errors
+                            // to be returned.
+                            // If we received an error the switch is not
+                            // in the correct role, so we need to disconnect it. 
+                            // We could also resend the request but then we need to
+                            // check if there are other pending request in which
+                            // case we shouldn't resend. If we do resend we need
+                            // to make sure that the switch eventually accepts one
+                            // of our requests or disconnect the switch. This feels
+                            // cumbersome. 
+                            sw.getChannel().close();
+                        }
                     }
+                    // Once we support OF 1.2, we'd add code to handle it here.
+                    //if (error.getXid() == state.ofRoleRequestXid) {
+                    //}
                     if (shouldLogError)
                         logError(sw, error);
                     break;
@@ -800,11 +956,12 @@ public class Controller
                     }
                     break;
                 case PORT_STATUS:
-                    // We want to update our port state info even if we're in the slave
-                    // role, but we only want to update storage if we're the master
-                    // (or equal).
-                    boolean updateStorage = state.hsState.equals(HandshakeState.READY) &&
-                        (sw.getRole() != Role.SLAVE);
+                    // We want to update our port state info even if we're in 
+                    // the slave role, but we only want to update storage if 
+                    // we're the master (or equal).
+                    boolean updateStorage = state.hsState.
+                                                equals(HandshakeState.READY) &&
+                                                (sw.getRole() != Role.SLAVE);
                     handlePortStatusMessage(sw, (OFPortStatus)m, updateStorage);
                     shouldHandleMessage = true;
                     break;
@@ -823,19 +980,21 @@ public class Controller
                                       "from switch {} before switch is " + 
                                       "fully configured.", m.getType(), sw);
                         }
-                        // Check if the controller is in the slave role for the switch.
-                        // If it is, then don't dispatch the message to the listeners.
-                        // FIXME: Should we dispatch messages that we expect to receive
-                        // when we're in the slave role, e.g. port status messages?
-                        // Since we're "hiding" switches from the listeners when we're 
-                        // in the slave role, then it seems a little weird to dispatch
-                        // port status messages to them. On the other hand there might be
-                        // special modules that care about all of the connected switches
+                        // Check if the controller is in the slave role for the 
+                        // switch. If it is, then don't dispatch the message to 
+                        // the listeners.
+                        // TODO: Should we dispatch messages that we expect to 
+                        // receive when we're in the slave role, e.g. port 
+                        // status messages? Since we're "hiding" switches from 
+                        // the listeners when we're in the slave role, then it 
+                        // seems a little weird to dispatch port status messages
+                        // to them. On the other hand there might be special 
+                        // modules that care about all of the connected switches
                         // and would like to receive port status notifications.
                         else if (sw.getRole() == Role.SLAVE) {
-                            // Don't log message if it's a port status message since we
-                            // expect to receive those from the switch and don't want
-                            // to emit spurious messages.
+                            // Don't log message if it's a port status message 
+                            // since we expect to receive those from the switch 
+                            // and don't want to emit spurious messages.
                             if (m.getType() != OFType.PORT_STATUS) {
                                 log.debug("Ignoring message type {} received " +
                                         "from switch {} while in the slave role.",
@@ -884,39 +1043,39 @@ public class Controller
     /**
      * flcontext_cache - Keep a thread local stack of contexts
      */
-	protected static final ThreadLocal<Stack<FloodlightContext>> flcontext_cache =
-		new ThreadLocal <Stack<FloodlightContext>> () {
-			@Override
-			protected Stack<FloodlightContext> initialValue() {
-				return new Stack<FloodlightContext>();
-			}
-		};
+    protected static final ThreadLocal<Stack<FloodlightContext>> flcontext_cache =
+        new ThreadLocal <Stack<FloodlightContext>> () {
+            @Override
+            protected Stack<FloodlightContext> initialValue() {
+                return new Stack<FloodlightContext>();
+            }
+        };
 
-	/**
-	 * flcontext_alloc - pop a context off the stack, if required create a new one
-	 * @return FloodlightContext
-	 */
-	protected static FloodlightContext flcontext_alloc() {
-		FloodlightContext flcontext = null;
+    /**
+     * flcontext_alloc - pop a context off the stack, if required create a new one
+     * @return FloodlightContext
+     */
+    protected static FloodlightContext flcontext_alloc() {
+        FloodlightContext flcontext = null;
 
-		if (flcontext_cache.get().empty()) {
-			flcontext = new FloodlightContext();
-		}
-		else {
-			flcontext = flcontext_cache.get().pop();
-		}
+        if (flcontext_cache.get().empty()) {
+            flcontext = new FloodlightContext();
+        }
+        else {
+            flcontext = flcontext_cache.get().pop();
+        }
 
-		return flcontext;
-	}
+        return flcontext;
+    }
 
-	/**
-	 * flcontext_free - Free the context to the current thread
-	 * @param flcontext
-	 */
-	protected void flcontext_free(FloodlightContext flcontext) {
-		flcontext.getStorage().clear();
-		flcontext_cache.get().push(flcontext);
-	}
+    /**
+     * flcontext_free - Free the context to the current thread
+     * @param flcontext
+     */
+    protected void flcontext_free(FloodlightContext flcontext) {
+        flcontext.getStorage().clear();
+        flcontext_cache.get().push(flcontext);
+    }
 
     /**
      * Handle replies to certain OFMessages, and pass others off to listeners
@@ -930,15 +1089,17 @@ public class Controller
                                  FloodlightContext bContext)
             throws IOException {
         Ethernet eth = null;
-        long startTime = 0;
-        
-        if (pktinProcTime.isEnabled()) {
-            startTime = System.nanoTime();
-        }
 
         switch (m.getType()) {
             case PACKET_IN:
                 OFPacketIn pi = (OFPacketIn)m;
+                
+                if (pi.getPacketData().length <= 0) {
+                    log.error("Ignoring PacketIn (Xid = " + pi.getXid() + 
+                              ") because the data field is empty.");
+                    return;
+                }
+                
                 if (Controller.ALWAYS_DECODE_ETH) {
                     eth = new Ethernet();
                     eth.deserialize(pi.getPacketData(), 0,
@@ -974,8 +1135,8 @@ public class Controller
                     // Get the starting time (overall and per-component) of 
                     // the processing chain for this packet if performance
                     // monitoring is turned on
-                    long startTime_ns = pktinProcTime.getStartTimeOnePkt();
-                    long compStartTime_ns;                       
+                    pktinProcTime.bootstrap(listeners);
+                    pktinProcTime.recordStartTimePktIn();                     
                     Command cmd;
                     for (IOFMessageListener listener : listeners) {
                         if (listener instanceof IOFSwitchFilter) {
@@ -984,32 +1145,20 @@ public class Controller
                             }
                         }
 
-                        // Get the start time of processing current packet for this listener
-                        compStartTime_ns = 
-                                pktinProcTime.getStartTimeOneComponent();
+                        pktinProcTime.recordStartTimeComp(listener);
                         cmd = listener.receive(sw, m, bc);
-                        pktinProcTime.
-                            updateCumulativeTimeOneComp(compStartTime_ns,
-                                                        listener.getId());
+                        pktinProcTime.recordEndTimeComp(listener);
                         
                         if (Command.STOP.equals(cmd)) {
                             break;
                         }
                     }
-                    pktinProcTime.updateCumulativeTimeTotal(startTime_ns);
+                    pktinProcTime.recordEndTimePktIn(sw, m, bc);
                 } else {
                     log.error("Unhandled OF Message: {} from {}", m, sw);
                 }
-                if ((bContext == null) && (bc != null)) flcontext_free(bc);
                 
-                if (pktinProcTime.isEnabled()) {
-                    long processingTime = System.nanoTime() - startTime;
-                    if (ptWarningThresholdInNano > 0 && processingTime > ptWarningThresholdInNano) {
-                        log.warn("Time to process packet-in: {} us", processingTime/1000.0);
-                        if (eth != null)
-                            log.warn("{}", OFMessage.getDataAsString(sw, m, bContext));
-                    }
-                }
+                if ((bContext == null) && (bc != null)) flcontext_free(bc);
         }
     }
     
@@ -1061,86 +1210,14 @@ public class Controller
     }
     
     /**
-     * Add a switch that has completed the initial handshake with the
-     * controller to the list of connected switches.
-     * @param sw the switch to connect
-     */
-    /*
-    protected void connectSwitch(OFSwitchImpl sw) {
-        // FIXME: robv: I don't think this code is completely thread-safe. I don't
-        // think it will work correctly if multiple switches with the same DPID
-        // connect at the same time. I think to handle that we'd need to have
-        // a controller-wide lock on the switch lists instead of trying to have
-        // per-switch locks. Having a single lock would reduce concurrency but
-        OFSwitchImpl oldSw = (OFSwitchImpl) this.connectedSwitches.get(sw.getId());
-        if (sw == oldSw) {
-            // Note == for object equality, not .equals for value
-            log.info("New switch connection for switch {} that's already connected", sw);
-            return;
-        }
-
-        log.info("Switch handshake successful: {}", sw);
-
-        if (oldSw != null) {
-            if (oldSw.isActive())
-                deactivateSwitch(oldSw);
-            disconnectSwitch(oldSw);
-            // Close the channel to disconnect the controller from the switch.
-            // This will eventually trigger a removeSwitch(), which will cause
-            // a "Not removing Switch ... already removed debug message.
-            // FIXME: Should be some better way to handle this to avoid spurious
-            // debug message.
-            oldSw.getChannel().close();
-        }
-        
-        sw.getWriteLock().lock();
-        try {
-            connectedSwitches.put(sw.getId(), sw);
-            sw.setConnected(true);
-        }
-        finally {
-            sw.getWriteLock().unlock();
-        }
-    }
-    */
-    /**
-     * Remove a switch from the list of connected switches
-     * @param sw the switch to disconnect
-     */
-    /*
-    protected void disconnectSwitch(IOFSwitch sw) {
-        oldSw.getListenerWriteLock().lock();
-        try {
-            log.error("New switch connection {} for already-connected switch {}",
-                      sw, oldSw);
-            oldSw.setConnected(false);
-            if (oldSw)
-            updateInactiveSwitchInfo(oldSw);
-
-            // we need to clean out old switch state definitively 
-            // before adding the new switch
-            if (switchListeners != null) {
-                for (IOFSwitchListener listener : switchListeners) {
-                    listener.removedSwitch(oldSw);
-                }
-            }
-            // will eventually trigger a removeSwitch(), which will cause
-            // a "Not removing Switch ... already removed debug message.
-            oldSw.getChannel().close();
-        }
-        finally {
-            oldSw.getWriteLock().unlock();
-        }
-    }
-    */
-    
-    /**
      * Add a switch to the active switch list and call the switch listeners.
      * This happens either when a switch first connects (and the controller is
      * not in the slave role) or when the role of the controller changes from
      * slave to master.
      * @param sw the switch that has been added
      */
+    // TODO: need to rethink locking and the synchronous switch update.
+    //       We can / should also handle duplicate DPIDs in connectedSwitches
     protected void addSwitch(IOFSwitch sw) {
         // TODO: is it safe to modify the HashMap without holding 
         // the old switch's lock?
@@ -1159,6 +1236,8 @@ public class Controller
                 // Set the connected flag to false to suppress calling
                 // the listeners for this switch in processOFMessage
                 oldSw.setConnected(false);
+                
+                oldSw.cancelAllStatisticsReplies();
                 
                 updateInactiveSwitchInfo(oldSw);
     
@@ -1187,7 +1266,7 @@ public class Controller
         }
         
         updateActiveSwitchInfo(sw);
-        Update update = new Update(sw, true);
+        SwitchUpdate update = new SwitchUpdate(sw, true);
         try {
             this.updates.put(update);
         } catch (InterruptedException e) {
@@ -1205,10 +1284,16 @@ public class Controller
         // No need to acquire the listener lock, since
         // this method is only called after netty has processed all
         // pending messages
+    	log.debug("removeSwitch: {}", sw);
         if (!this.activeSwitches.remove(sw.getId(), sw) || !sw.isConnected()) {
             log.debug("Not removing switch {}; already removed", sw);
             return;
         }
+        // We cancel all outstanding statistics replies if the switch transition
+        // from active. In the future we might allow statistics requests 
+        // from slave controllers. Then we need to move this cancelation
+        // to switch disconnect
+        sw.cancelAllStatisticsReplies();
             
         // FIXME: I think there's a race condition if we call updateInactiveSwitchInfo
         // here if role support is enabled. In that case if the switch is being
@@ -1220,7 +1305,7 @@ public class Controller
         // of the switch state that's written to storage.
         
         updateInactiveSwitchInfo(sw);
-        Update update = new Update(sw, false);
+        SwitchUpdate update = new SwitchUpdate(sw, false);
         try {
             this.updates.put(update);
         } catch (InterruptedException e) {
@@ -1242,18 +1327,6 @@ public class Controller
             messageListeners.put(type, ldd);
         }
         ldd.addListener(type, listener);
-        
-        if (log.isDebugEnabled()) {
-            StringBuffer sb = new StringBuffer();
-            sb.append("OFListeners for ");
-            sb.append(type);
-            sb.append(": ");
-            for (IOFMessageListener l : ldd.getOrderedListeners()) {
-                sb.append(l.getName());
-                sb.append(",");
-            }
-            log.debug(sb.toString());
-        }
     }
 
     @Override
@@ -1266,13 +1339,35 @@ public class Controller
         }
     }
     
+    private void logListeners() {
+        for (Map.Entry<OFType,
+                       ListenerDispatcher<OFType, 
+                                          IOFMessageListener>> entry
+             : messageListeners.entrySet()) {
+            
+            OFType type = entry.getKey();
+            ListenerDispatcher<OFType, IOFMessageListener> ldd = 
+                    entry.getValue();
+            
+            StringBuffer sb = new StringBuffer();
+            sb.append("OFListeners for ");
+            sb.append(type);
+            sb.append(": ");
+            for (IOFMessageListener l : ldd.getOrderedListeners()) {
+                sb.append(l.getName());
+                sb.append(",");
+            }
+            log.debug(sb.toString());            
+        }
+    }
+    
     public void removeOFMessageListeners(OFType type) {
         messageListeners.remove(type);
     }
 
     @Override
     public Map<Long, IOFSwitch> getSwitches() {
-        return this.activeSwitches;
+        return Collections.unmodifiableMap(this.activeSwitches);
     }
 
     @Override
@@ -1299,6 +1394,11 @@ public class Controller
     @Override
     public boolean injectOfMessage(IOFSwitch sw, OFMessage msg,
                                    FloodlightContext bc) {
+        if (sw == null) {
+            log.info("Failed to inject OFMessage {} onto a null switch", msg);
+            return false;
+        }
+        
         // FIXME: Do we need to be able to inject messages to switches
         // where we're the slave controller (i.e. they're connected but
         // not active)?
@@ -1319,11 +1419,6 @@ public class Controller
             return false;
         }
         return true;
-    }
-
-    @Override
-    public ScheduledExecutorService getScheduledExecutor() {
-        return executor;
     }
 
     @Override
@@ -1371,13 +1466,9 @@ public class Controller
         return factory;
     }
     
-    // *************
-    // IOFController
-    // *************
-    
     @Override
     public String getControllerId() {
-        return "localhost";
+        return controllerId;
     }
     
     // **************
@@ -1486,6 +1577,7 @@ public class Controller
     }
     
     protected void updateInactiveSwitchInfo(IOFSwitch sw) {
+    	log.debug("Update DB with inactiveSW {}", sw);
         // Update the controller info in the storage source to be inactive
         Map<String, Object> switchInfo = new HashMap<String, Object>();
         String datapathIdString = sw.getStringId();
@@ -1523,20 +1615,82 @@ public class Controller
         storageSource.updateRowAsync(PORT_TABLE_NAME, portInfo);
     }
     
+    /**
+     * Read switch port data from storage and write it into a switch object
+     * @param sw the switch to update
+     */
+    protected void readSwitchPortStateFromStorage(OFSwitchImpl sw) {
+        OperatorPredicate op = 
+                new OperatorPredicate(PORT_SWITCH, 
+                                      OperatorPredicate.Operator.EQ,
+                                      sw.getStringId());
+        IResultSet portResultSet = 
+                storageSource.executeQuery(PORT_TABLE_NAME,
+                                           null, op, null);
+        //Map<Short, OFPhysicalPort> oldports = 
+        //        new HashMap<Short, OFPhysicalPort>();
+        //oldports.putAll(sw.getPorts());
+
+        while (portResultSet.next()) {
+            try {
+                OFPhysicalPort p = new OFPhysicalPort();
+                p.setPortNumber((short)portResultSet.getInt(PORT_NUMBER));
+                p.setName(portResultSet.getString(PORT_NAME));
+                p.setConfig((int)portResultSet.getLong(PORT_CONFIG));
+                p.setState((int)portResultSet.getLong(PORT_STATE));
+                String portMac = portResultSet.getString(PORT_HARDWARE_ADDRESS);
+                p.setHardwareAddress(HexString.fromHexString(portMac));
+                p.setCurrentFeatures((int)portResultSet.
+                                     getLong(PORT_CURRENT_FEATURES));
+                p.setAdvertisedFeatures((int)portResultSet.
+                                        getLong(PORT_ADVERTISED_FEATURES));
+                p.setSupportedFeatures((int)portResultSet.
+                                       getLong(PORT_SUPPORTED_FEATURES));
+                p.setPeerFeatures((int)portResultSet.
+                                  getLong(PORT_PEER_FEATURES));
+                //oldports.remove(Short.valueOf(p.getPortNumber()));
+                sw.setPort(p);
+            } catch (NullPointerException e) {
+                // ignore
+            }
+        }
+
+        //for (Short portNum : oldports.keySet()) {
+        //    sw.deletePort(portNum);
+        //}
+	}
+    
     protected void removePortInfo(IOFSwitch sw, short portNumber) {
         String datapathIdString = sw.getStringId();
         String id = datapathIdString + "|" + portNumber;
         storageSource.deleteRowAsync(PORT_TABLE_NAME, id);
     }
 
-    protected Role getInitialRole() {
-        // FIXME: This code should be changed to get the settings from
-        // the property file used by the module loader once Alex has
-        // that code written instead of using system properties.
+    /**
+     * Sets the initial role based on properties in the config params.
+     * It looks for two different properties.
+     * If the "role" property is specified then the value should be
+     * either "EQUAL", "MASTER", or "SLAVE" and the role of the
+     * controller is set to the specified value. If the "role" property
+     * is not specified then it looks next for the "role.path" property.
+     * In this case the value should be the path to a property file in
+     * the file system that contains a property called "floodlight.role"
+     * which can be one of the values listed above for the "role" property.
+     * The idea behind the "role.path" mechanism is that you have some
+     * separate heartbeat and master controller election algorithm that
+     * determines the role of the controller. When a role transition happens,
+     * it updates the current role in the file specified by the "role.path"
+     * file. Then if floodlight restarts for some reason it can get the
+     * correct current role of the controller from the file.
+     * @param configParams The config params for the FloodlightProvider service
+     * @return A valid role if role information is specified in the
+     *         config params, otherwise null
+     */
+    protected Role getInitialRole(Map<String, String> configParams) {
         Role role = null;
-        String roleString = System.getProperty("floodlight.role");
+        String roleString = configParams.get("role");
         if (roleString == null) {
-            String rolePath = System.getProperty("floodlight.role.path");
+            String rolePath = configParams.get("rolepath");
             if (rolePath != null) {
                 Properties properties = new Properties();
                 try {
@@ -1544,7 +1698,11 @@ public class Controller
                     roleString = properties.getProperty("floodlight.role");
                 }
                 catch (IOException exc) {
-                    log.error("Error reading current role value from file: {}", rolePath);
+                	// Don't treat it as an error if the file specified by the
+                	// rolepath property doesn't exist. This lets us enable the
+                	// HA mechanism by just creating/setting the floodlight.role
+                	// property in that file without having to modify the
+                	// floodlight properties.
                 }
             }
         }
@@ -1560,6 +1718,8 @@ public class Controller
             }
         }
         
+        log.info("Controller roles set to {}", role);
+        
         return role;
     }
     
@@ -1568,6 +1728,10 @@ public class Controller
      * @throws IOException 
      */
     public void run() {
+        if (log.isDebugEnabled()) {
+            logListeners();
+        }
+        
         try {            
            final ServerBootstrap bootstrap = createServerBootStrap();
 
@@ -1591,23 +1755,13 @@ public class Controller
         // main loop
         while (true) {
             try {
-                Update update = updates.take();
-                log.debug("Dispatching switch update {} {}",
-                          update.sw, update.added);
-                if (switchListeners != null) {
-                    for (IOFSwitchListener listener : switchListeners) {
-                        if (update.added)
-                            listener.addedSwitch(update.sw);
-                        else
-                            listener.removedSwitch(update.sw);
-                    }
-                }
+                IUpdate update = updates.take();
+                update.dispatch();
             } catch (InterruptedException e) {
                 return;
             } catch (StorageException e) {
                 log.error("Storage exception in controller " + 
-                          "updates loop; terminating process",
-                          e);
+                          "updates loop; terminating process", e);
                 return;
             } catch (Exception e) {
                 log.error("Exception in controller updates loop", e);
@@ -1639,7 +1793,12 @@ public class Controller
         if (threads != null) {
             this.workerThreads = Integer.parseInt(threads);
         }
-        log.info("Number of worker threads port set to {}", this.workerThreads);
+        log.info("Number of worker threads set to {}", this.workerThreads);
+        String controllerId = configParams.get("controllerid");
+        if (controllerId != null) {
+            this.controllerId = controllerId;
+        }
+        log.info("ControllerId set to {}", this.controllerId);
     }
 
     private void initVendorMessages() {
@@ -1671,14 +1830,18 @@ public class Controller
                                       ListenerDispatcher<OFType, 
                                                          IOFMessageListener>>();
         this.switchListeners = new CopyOnWriteArraySet<IOFSwitchListener>();
+        this.haListeners = new CopyOnWriteArraySet<IHAListener>();
         this.activeSwitches = new ConcurrentHashMap<Long, IOFSwitch>();
-        this.connectedSwitches = new ConcurrentHashMap<Long, IOFSwitch>();
-        this.updates = new LinkedBlockingQueue<Update>();
+        this.connectedSwitches = new HashSet<OFSwitchImpl>();
+        this.controllerNodeIPsCache = new HashMap<String, String>();
+        this.updates = new LinkedBlockingQueue<IUpdate>();
         this.factory = new BasicFactory();
         this.providerMap = new HashMap<String, List<IInfoProvider>>();
         setConfigParams(configParams);
-        this.setRole(getInitialRole());
+        this.role = getInitialRole(configParams);
+        this.roleChanger = new RoleChanger();
         initVendorMessages();
+        this.systemStartTime = System.currentTimeMillis();
     }
     
     /**
@@ -1690,11 +1853,16 @@ public class Controller
         storageSource.createTable(CONTROLLER_TABLE_NAME, null);
         storageSource.createTable(SWITCH_TABLE_NAME, null);
         storageSource.createTable(PORT_TABLE_NAME, null);
+        storageSource.createTable(CONTROLLER_INTERFACE_TABLE_NAME, null);
+        storageSource.createTable(SWITCH_CONFIG_TABLE_NAME, null);
         storageSource.setTablePrimaryKeyName(CONTROLLER_TABLE_NAME,
                                              CONTROLLER_ID);
         storageSource.setTablePrimaryKeyName(SWITCH_TABLE_NAME,
                                              SWITCH_DATAPATH_ID);
         storageSource.setTablePrimaryKeyName(PORT_TABLE_NAME, PORT_ID);
+        storageSource.setTablePrimaryKeyName(CONTROLLER_INTERFACE_TABLE_NAME, 
+                                             CONTROLLER_INTERFACE_ID);
+        storageSource.addListener(CONTROLLER_INTERFACE_TABLE_NAME, this);
         
         while (true) {
             try {
@@ -1710,45 +1878,143 @@ public class Controller
             }
         }
         log.info("Connected to storage source");
-                
-        // Processing Time Warning Threshold
-        ptWarningThresholdInNano = Long.parseLong(System.getProperty(
-             "net.floodlightcontroller.core.PTWarningThresholdInMilli", "0")) * 1000000;
-        if (ptWarningThresholdInNano > 0) {
-            log.info("Packet processing time threshold for warning set to {} ms.",
-                 ptWarningThresholdInNano/1000000);
-        }
        
         // Add our REST API
         restApi.addRestletRoutable(new CoreWebRoutable());
     }
 
-	@Override
-	public void addInfoProvider(String type, IInfoProvider provider) {
-		if (!providerMap.containsKey(type)) {
-			providerMap.put(type, new ArrayList<IInfoProvider>());
-		}
-		providerMap.get(type).add(provider);
-	}
+    @Override
+    public void addInfoProvider(String type, IInfoProvider provider) {
+        if (!providerMap.containsKey(type)) {
+            providerMap.put(type, new ArrayList<IInfoProvider>());
+        }
+        providerMap.get(type).add(provider);
+    }
+
+    @Override
+    public void removeInfoProvider(String type, IInfoProvider provider) {
+        if (!providerMap.containsKey(type)) {
+            log.debug("Provider type {} doesn't exist.", type);
+            return;
+        }
+        
+        providerMap.get(type).remove(provider);
+    }
+    
+    public Map<String, Object> getControllerInfo(String type) {
+        if (!providerMap.containsKey(type)) return null;
+        
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        for (IInfoProvider provider : providerMap.get(type)) {
+            result.putAll(provider.getInfo(type));
+        }
+        
+        return result;
+    }
+
+    @Override
+    public void addHAListener(IHAListener listener) {
+        this.haListeners.add(listener);
+    }
+
+    @Override
+    public void removeHAListener(IHAListener listener) {
+        this.haListeners.remove(listener);
+    }
+    
+    
+    /**
+     * Handle changes to the controller nodes IPs and dispatch update. 
+     */
+    @SuppressWarnings("unchecked")
+    protected void handleControllerNodeIPChanges() {
+        HashMap<String,String> curControllerNodeIPs = new HashMap<String,String>();
+        HashMap<String,String> addedControllerNodeIPs = new HashMap<String,String>();
+        HashMap<String,String> removedControllerNodeIPs =new HashMap<String,String>();
+        String[] colNames = { CONTROLLER_INTERFACE_CONTROLLER_ID, 
+                           CONTROLLER_INTERFACE_TYPE, 
+                           CONTROLLER_INTERFACE_NUMBER, 
+                           CONTROLLER_INTERFACE_DISCOVERED_IP };
+        synchronized(controllerNodeIPsCache) {
+            // We currently assume that interface Ethernet0 is the relevant
+            // controller interface. Might change.
+            // We could (should?) implement this using 
+            // predicates, but creating the individual and compound predicate
+            // seems more overhead then just checking every row. Particularly, 
+            // since the number of rows is small and changes infrequent
+            IResultSet res = storageSource.executeQuery(CONTROLLER_INTERFACE_TABLE_NAME,
+                    colNames,null, null);
+            while (res.next()) {
+                if (res.getString(CONTROLLER_INTERFACE_TYPE).equals("Ethernet") &&
+                        res.getInt(CONTROLLER_INTERFACE_NUMBER) == 0) {
+                    String controllerID = res.getString(CONTROLLER_INTERFACE_CONTROLLER_ID);
+                    String discoveredIP = res.getString(CONTROLLER_INTERFACE_DISCOVERED_IP);
+                    String curIP = controllerNodeIPsCache.get(controllerID);
+                    
+                    curControllerNodeIPs.put(controllerID, discoveredIP);
+                    if (curIP == null) {
+                        // new controller node IP
+                        addedControllerNodeIPs.put(controllerID, discoveredIP);
+                    } 
+                    else if (curIP != discoveredIP) {
+                        // IP changed                    
+                        removedControllerNodeIPs.put(controllerID, curIP);
+                        addedControllerNodeIPs.put(controllerID, discoveredIP);
+                    }
+                }
+            }
+            // Now figure out if rows have been deleted. We can't use the
+            // rowKeys from rowsDeleted directly, since the tables primary
+            // key is a compound that we can't disassemble
+            Set<String> curEntries = curControllerNodeIPs.keySet();
+            Set<String> removedEntries = controllerNodeIPsCache.keySet();
+            removedEntries.removeAll(curEntries);
+            for (String removedControllerID : removedEntries)
+                removedControllerNodeIPs.put(removedControllerID, controllerNodeIPsCache.get(removedControllerID));
+            controllerNodeIPsCache = (HashMap<String, String>) curControllerNodeIPs.clone();
+            HAControllerNodeIPUpdate update = new HAControllerNodeIPUpdate(
+                                curControllerNodeIPs, addedControllerNodeIPs,
+                                removedControllerNodeIPs);
+            if (!removedControllerNodeIPs.isEmpty() || !addedControllerNodeIPs.isEmpty()) {
+                try {
+                    this.updates.put(update);
+                } catch (InterruptedException e) {
+                    log.error("Failure adding update to queue", e);
+                }
+            }
+        }
+    }
+    
+    @Override
+    public Map<String, String> getControllerNodeIPs() {
+        // We return a copy of the mapping so we can guarantee that
+        // the mapping return is the same as one that will be (or was)
+        // dispatched to IHAListeners
+        HashMap<String,String> retval = new HashMap<String,String>();
+        synchronized(controllerNodeIPsCache) {
+            retval.putAll(controllerNodeIPsCache);
+        }
+        return retval;
+    }
+
+    @Override
+    public void rowsModified(String tableName, Set<Object> rowKeys) {
+        if (tableName.equals(CONTROLLER_INTERFACE_TABLE_NAME)) {
+            handleControllerNodeIPChanges();
+        }
+        
+    }
+
+    @Override
+    public void rowsDeleted(String tableName, Set<Object> rowKeys) {
+        if (tableName.equals(CONTROLLER_INTERFACE_TABLE_NAME)) {
+            handleControllerNodeIPChanges();
+        }
+    }
 
 	@Override
-	public void removeInfoProvider(String type, IInfoProvider provider) {
-		if (!providerMap.containsKey(type)) {
-			log.debug("Provider type {} doesn't exist.", type);
-			return;
-		}
-		
-		providerMap.get(type).remove(provider);
+	public long getSystemStartTime() {
+		return (this.systemStartTime);
 	}
-	
-	public Map<String, Object> getControllerInfo(String type) {
-		if (!providerMap.containsKey(type)) return null;
-		
-		Map<String, Object> result = new LinkedHashMap<String, Object>();
-		for (IInfoProvider provider : providerMap.get(type)) {
-			result.putAll(provider.getInfo(type));
-		}
-		
-		return result;
-	}
+
 }

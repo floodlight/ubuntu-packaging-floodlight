@@ -1,68 +1,129 @@
 package net.floodlightcontroller.perfmon;
 
-public class OneComponentTime {
-    int    compId;
-    String compName;
-    int    pktCnt;
-    int    sumProcTime_us;
-    long   sumSquaredProcTime_us2;
-    int    maxProcTime_us;
-    int    minProcTime_us;
-    int    avgProcTime_us;
-    int    sigmaProcTime_us;  // std. deviation
+import org.codehaus.jackson.annotate.JsonProperty;
 
-    public int getCompId() {
-        return compId;
+import net.floodlightcontroller.core.IOFMessageListener;
+
+/**
+ * Holds OF message processing time information for one IFloodlightModule.
+ * @author Subrata
+ */
+public class OneComponentTime {
+    private int compId; // hascode of IOFMessageListener
+    private String compName;
+    private int pktCnt;
+    // all times in nanoseconds
+    private long totalProcTimeNs;
+    private long sumSquaredProcTimeNs2; // squared
+    private long maxProcTimeNs;
+    private long minProcTimeNs;
+    private long avgProcTimeNs;
+    private long sigmaProcTimeNs;  // std. deviation
+
+    public OneComponentTime(IOFMessageListener module) {
+        compId = module.hashCode();
+        compName = module.getClass().getCanonicalName();
+        resetAllCounters();
     }
-    public void setCompId(int compId) {
-        this.compId = compId;
+    
+    public void resetAllCounters() {
+        maxProcTimeNs = Long.MIN_VALUE;
+        minProcTimeNs = Long.MAX_VALUE;
+        pktCnt = 0;
+        totalProcTimeNs = 0;
+        sumSquaredProcTimeNs2 = 0;
+        avgProcTimeNs = 0;
+        sigmaProcTimeNs = 0;
     }
+    
+    @JsonProperty("module-name")
     public String getCompName() {
         return compName;
     }
-    public void setCompName(String compName) {
-        this.compName = compName;
-    }
+
+    @JsonProperty("num-packets")
     public int getPktCnt() {
         return pktCnt;
     }
-    public void setPktCnt(int pktCnt) {
-        this.pktCnt = pktCnt;
+
+    @JsonProperty("total")
+    public long getSumProcTimeNs() {
+        return totalProcTimeNs;
     }
-    public int getSumProcTime_us() {
-        return sumProcTime_us;
+
+    @JsonProperty("max")
+    public long getMaxProcTimeNs() {
+        return maxProcTimeNs;
     }
-    public void setSumProcTime_us(int sumProcTime_us) {
-        this.sumProcTime_us = sumProcTime_us;
+
+    @JsonProperty("min")
+    public long getMinProcTimeNs() {
+        return minProcTimeNs;
     }
-    public long getSumSquaredProcTime_us2() {
-        return sumSquaredProcTime_us2;
+
+    @JsonProperty("average")
+    public long getAvgProcTimeNs() {
+        return avgProcTimeNs;
     }
-    public void setSumSquaredProcTime_us2(long sumSquaredProcTime_us2) {
-        this.sumSquaredProcTime_us2 = sumSquaredProcTime_us2;
+
+    @JsonProperty("std-dev")
+    public long getSigmaProcTimeNs() {
+        return sigmaProcTimeNs;
     }
-    public int getMaxProcTime_us() {
-        return maxProcTime_us;
+    
+    @JsonProperty("average-squared")
+    public long getSumSquaredProcTimeNs() {
+        return sumSquaredProcTimeNs2;
     }
-    public void setMaxProcTime_us(int maxProcTime_us) {
-        this.maxProcTime_us = maxProcTime_us;
+
+    // Methods used to update the counters
+    
+    private void increasePktCount() {
+        pktCnt++;
     }
-    public int getMinProcTime_us() {
-        return minProcTime_us;
+    
+    private void updateTotalProcessingTime(long procTimeNs) {
+        totalProcTimeNs += procTimeNs;
     }
-    public void setMinProcTime_us(int minProcTime_us) {
-        this.minProcTime_us = minProcTime_us;
+    
+    private void updateAvgProcessTime() {
+        avgProcTimeNs = totalProcTimeNs / pktCnt;
     }
-    public int getAvgProcTime_us() {
-        return avgProcTime_us;
+    
+    private void updateSquaredProcessingTime(long procTimeNs) {
+        sumSquaredProcTimeNs2 += (Math.pow(procTimeNs, 2));
     }
-    public void setAvgProcTime_us(int avgProcTime_us) {
-        this.avgProcTime_us = avgProcTime_us;
+    
+    private void calculateMinProcTime(long curTimeNs) {
+        if (curTimeNs < minProcTimeNs)
+            minProcTimeNs = curTimeNs;
     }
-    public int getSigmaProcTime_us() {
-        return sigmaProcTime_us;
+    
+    private void calculateMaxProcTime(long curTimeNs) {
+        if (curTimeNs > maxProcTimeNs)
+            maxProcTimeNs = curTimeNs;
     }
-    public void setSigmaProcTime_us(int sigmaProcTime_us) {
-        this.sigmaProcTime_us = sigmaProcTime_us;
+    
+    public void computeSigma() {
+        // Computes std. deviation from the sum of count numbers and from
+        // the sum of the squares of count numbers
+        double temp = totalProcTimeNs;
+        temp = Math.pow(temp, 2) / pktCnt;
+        temp = (sumSquaredProcTimeNs2 - temp) / pktCnt;
+        sigmaProcTimeNs = (long) Math.sqrt(temp);
+    }
+    
+    public void updatePerPacketCounters(long procTimeNs) {
+        increasePktCount();
+        updateTotalProcessingTime(procTimeNs);
+        calculateMinProcTime(procTimeNs);
+        calculateMaxProcTime(procTimeNs);
+        updateAvgProcessTime();
+        updateSquaredProcessingTime(procTimeNs);
+    }
+    
+    @Override
+    public int hashCode() {
+        return compId;
     }
 }

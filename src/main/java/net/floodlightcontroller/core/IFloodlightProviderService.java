@@ -19,7 +19,6 @@ package net.floodlightcontroller.core;
 
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ScheduledExecutorService;
 
 import net.floodlightcontroller.core.module.IFloodlightService;
 import net.floodlightcontroller.packet.Ethernet;
@@ -57,18 +56,24 @@ public interface IFloodlightProviderService extends IFloodlightService {
             new FloodlightContextStore<Ethernet>();
 
     /**
-     * 
-     * @param type
-     * @param listener
+     * Adds an OpenFlow message listener
+     * @param type The OFType the component wants to listen for
+     * @param listener The component that wants to listen for the message
      */
     public void addOFMessageListener(OFType type, IOFMessageListener listener);
 
     /**
-     * 
-     * @param type
-     * @param listener
+     * Removes an OpenFlow message listener
+     * @param type The OFType the component no long wants to listen for
+     * @param listener The component that no longer wants to receive the message
      */
     public void removeOFMessageListener(OFType type, IOFMessageListener listener);
+    
+    /**
+     * Return a non-modifiable list of all current listeners
+     * @return listeners
+     */
+    public Map<OFType, List<IOFMessageListener>> getListeners();
 
     /**
      * Returns a list of all actively connected OpenFlow switches. This doesn't
@@ -83,35 +88,45 @@ public interface IFloodlightProviderService extends IFloodlightService {
     public Role getRole();
     
     /**
+     * Get the current mapping of controller IDs to their IP addresses
+     * Returns a copy of the current mapping. 
+     * @see IHAListener
+     */
+    public Map<String,String> getControllerNodeIPs();
+    
+    /**
+     * Gets the ID of the controller
+     */
+    public String getControllerId();
+    
+    /**
      * Set the role of the controller
      */
     public void setRole(Role role);
     
     /**
      * Add a switch listener
-     * @param listener
+     * @param listener The module that wants to listen for events
      */
     public void addOFSwitchListener(IOFSwitchListener listener);
 
     /**
      * Remove a switch listener
-     * @param listener
+     * @param listener The The module that no longer wants to listen for events
      */
     public void removeOFSwitchListener(IOFSwitchListener listener);
-
+    
     /**
-     * Return a non-modifiable list of all current listeners
-     * @return listeners
+     * Adds a listener for HA role events
+     * @param listener The module that wants to listen for events
      */
-    public Map<OFType, List<IOFMessageListener>> getListeners();
-
+    public void addHAListener(IHAListener listener);
+    
     /**
-     * Get the master scheduled thread pool executor maintained by the
-     * floodlight provider.  This can be used by other modules as a centralized
-     * way to schedule tasks.
-     * @return
+     * Removes a listener for HA role events
+     * @param listener The module that no longer wants to listen for events
      */
-    public ScheduledExecutorService getScheduledExecutor();
+    public void removeHAListener(IHAListener listener);
 
     /**
      * Terminate the process
@@ -176,5 +191,12 @@ public interface IFloodlightProviderService extends IFloodlightService {
     * @return
     */
    public Map<String, Object> getControllerInfo(String type);
+   
+   
+   /**
+    * Return the controller start time in  milliseconds
+    * @return
+    */
+   public long getSystemStartTime();
 
 }

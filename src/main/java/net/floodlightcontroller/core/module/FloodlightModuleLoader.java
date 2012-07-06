@@ -55,8 +55,10 @@ public class FloodlightModuleLoader {
 	 * serviceMap -> Maps a service to a module
 	 * moduleServiceMap -> Maps a module to all the services it provides
 	 * moduleNameMap -> Maps the string name to the module
+	 * @throws FloodlightModuleException If two modules are specified in the configuration
+	 * that provide the same service.
 	 */
-	protected static void findAllModules() {
+	protected static void findAllModules(Collection<String> mList) throws FloodlightModuleException {
 	    synchronized (lock) {
 	        if (serviceMap != null) return;
 	        serviceMap = 
@@ -94,6 +96,23 @@ public class FloodlightModuleLoader {
 	                        serviceMap.put(s, mods);
 	                    }
 	                    mods.add(m);
+	                    // Make sure they haven't specified duplicate modules in the config
+	                    int dupInConf = 0;
+	                    for (IFloodlightModule cMod : mods) {
+	                        if (mList.contains(cMod.getClass().getCanonicalName()))
+	                            dupInConf++;
+	                    }
+	                    
+	                    if (dupInConf > 1) {
+	                        String duplicateMods = "";
+                            for (IFloodlightModule mod : mods) {
+                                duplicateMods += mod.getClass().getCanonicalName() + ", ";
+                            }
+	                        throw new FloodlightModuleException("ERROR! The configuraiton " +
+	                                " file specifies more than one module that provides the service " +
+	                                s.getCanonicalName() +". Please specify only ONE of the " +
+	                                "following modules in the config file: " + duplicateMods);
+	                    }
 	                }
 	            }
 	        }
@@ -123,21 +142,23 @@ public class FloodlightModuleLoader {
                 e.printStackTrace();
             }
         } else {
-            logger.debug("Loading default modules");
+            logger.info("Loading default modules");
             InputStream is = this.getClass().getClassLoader().
                                     getResourceAsStream(COMPILED_CONF_FILE);
             try {
                 prop.load(is);
             } catch (IOException e) {
                 logger.error("Error, could not load default modules");
-                e.printStackTrace();
+                logger.error(e.getMessage());
                 System.exit(1);
             }
         }
         
         String moduleList = prop.getProperty(FLOODLIGHT_MODULES_KEY)
                                 .replaceAll("\\s", "");
-        return loadModulesFromList(moduleList.split(","), prop);
+        Collection<String> configMods = new ArrayList<String>();
+        configMods.addAll(Arrays.asList(moduleList.split(",")));
+        return loadModulesFromList(configMods, prop);
 	}
 	
 	/**
@@ -146,18 +167,16 @@ public class FloodlightModuleLoader {
 	 * @return The ModuleContext containing all the loaded modules
 	 * @throws FloodlightModuleException
 	 */
-	public IFloodlightModuleContext loadModulesFromList(String[] mList, Properties prop) 
+	public IFloodlightModuleContext loadModulesFromList(Collection<String> configMods, Properties prop) 
             throws FloodlightModuleException {
         logger.debug("Starting module loader");
-        findAllModules();
+        findAllModules(configMods);
         
-        Set<IFloodlightModule> moduleSet = new HashSet<IFloodlightModule>();
+        Collection<IFloodlightModule> moduleSet = new ArrayList<IFloodlightModule>();
         Map<Class<? extends IFloodlightService>, IFloodlightModule> moduleMap =
                 new HashMap<Class<? extends IFloodlightService>,
                             IFloodlightModule>();
 
-        HashSet<String> configMods = new HashSet<String>();
-        configMods.addAll(Arrays.asList(mList));
         Queue<String> moduleQ = new LinkedList<String>();
         // Add the explicitly configured modules to the q
         moduleQ.addAll(configMods);
@@ -202,10 +221,15 @@ public class FloodlightModuleLoader {
                                 }
                             }
                             if (!found) {
+                                String duplicateMods = "";
+                                for (IFloodlightModule mod : mods) {
+                                    duplicateMods += mod.getClass().getCanonicalName() + ", ";
+                                }
                                 throw new FloodlightModuleException("ERROR! Found more " + 
-                                        "than one (" + mods.size() + ") IFloodlightModules that provides " + 
-                                        "service " + c.toString() + 
-                                        ". Please resolve this in the config");
+                                    "than one (" + mods.size() + ") IFloodlightModules that provides " +
+                                    "service " + c.toString() + 
+                                    ". Please specify one of the following modules in the config: " + 
+                                    duplicateMods);
                             }
                         }
                     }
@@ -213,7 +237,7 @@ public class FloodlightModuleLoader {
             }
         }
         
-        floodlightModuleContext.createConfigMaps(moduleSet);
+        floodlightModuleContext.setModuleSet(moduleSet);
         parseConfigParameters(prop);
         initModules(moduleSet);
         startupModules(moduleSet);
@@ -229,7 +253,7 @@ public class FloodlightModuleLoader {
 	 */
 	protected void addModule(Map<Class<? extends IFloodlightService>, 
                                            IFloodlightModule> moduleMap,
-                            Set<IFloodlightModule> moduleSet,
+                            Collection<IFloodlightModule> moduleSet,
                             IFloodlightModule module) {
         if (!moduleSet.contains(module)) {
             Collection<Class<? extends IFloodlightService>> servs =
@@ -243,11 +267,11 @@ public class FloodlightModuleLoader {
 	}
 
     /**
-     * Allocate service implementations and then init all the modules
+     * Allocate  service implementations and then init all the modules
      * @param moduleSet The set of modules to call their init function on
      * @throws FloodlightModuleException If a module can not properly be loaded
      */
-    protected void initModules(Set<IFloodlightModule> moduleSet) 
+    protected void initModules(Collection<IFloodlightModule> moduleSet) 
                                            throws FloodlightModuleException {
         for (IFloodlightModule module : moduleSet) {            
             // Get the module's service instance(s)
@@ -263,8 +287,18 @@ public class FloodlightModuleLoader {
                                      "  as provider for " + 
                                      s.getKey().getCanonicalName());
                     }
-                    floodlightModuleContext.addService(s.getKey(),
-                                                       s.getValue());
+                    if (floodlightModuleContext.getServiceImpl(s.getKey()) == null) {
+                        floodlightModuleContext.addService(s.getKey(),
+                                                           s.getValue());
+                    } else {
+                        throw new FloodlightModuleException("Cannot set "
+                                                            + s.getValue()
+                                                            + " as the provider for "
+                                                            + s.getKey().getCanonicalName()
+                                                            + " because "
+                                                            + floodlightModuleContext.getServiceImpl(s.getKey())
+                                                            + " already provides it");
+                    }
                 }
             }
         }
@@ -283,7 +317,7 @@ public class FloodlightModuleLoader {
      * Call each loaded module's startup method
      * @param moduleSet the module set to start up
      */
-    protected void startupModules(Set<IFloodlightModule> moduleSet) {
+    protected void startupModules(Collection<IFloodlightModule> moduleSet) {
         for (IFloodlightModule m : moduleSet) {
             if (logger.isDebugEnabled()) {
                 logger.debug("Starting " + 

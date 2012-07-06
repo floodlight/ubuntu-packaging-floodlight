@@ -39,6 +39,7 @@ public class CoreWebRoutable implements RestletRoutable {
         Router router = new Router(context);
         router.attach("/module/all/json", ModuleLoaderResource.class);
         router.attach("/module/loaded/json", LoadedModuleLoaderResource.class);
+        router.attach("/switch/{switchId}/role/json", SwitchRoleResource.class);
         router.attach("/switch/all/{statType}/json", AllSwitchStatisticsResource.class);
         router.attach("/switch/{switchId}/{statType}/json", SwitchStatisticsResource.class);
         router.attach("/controller/switches/json", ControllerSwitchesResource.class);
@@ -48,10 +49,6 @@ public class CoreWebRoutable implements RestletRoutable {
         router.attach("/memory/json", ControllerMemoryResource.class);
         router.attach("/packettrace/json", PacketTraceResource.class);
         // Get the last {count} events from the event histories
-        router.attach("/event-history/attachment-point/{count}/json",
-                EventHistoryAttachmentPointResource.class);
-        router.attach("/event-history/packet-in/{count}/json",
-                EventHistoryPacketInResource.class);
         router.attach("/event-history/topology-switch/{count}/json",
                 EventHistoryTopologySwitchResource.class);
         router.attach("/event-history/topology-link/{count}/json",
@@ -60,8 +57,9 @@ public class CoreWebRoutable implements RestletRoutable {
                 EventHistoryTopologyClusterResource.class);
         router.attach("/storage/tables/json", StorageSourceTablesResource.class);
         router.attach("/controller/summary/json", ControllerSummaryResource.class);
-        router.attach("/role/json", RoleResource.class);
+        router.attach("/role/json", ControllerRoleResource.class);
         router.attach("/health/json", HealthCheckResource.class);
+        router.attach("/system/uptime/json", SystemUptimeResource.class);
         return router;
     }
 }

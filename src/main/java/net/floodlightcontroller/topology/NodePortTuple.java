@@ -1,20 +1,54 @@
 package net.floodlightcontroller.topology;
 
-public class NodePortTuple {
-    protected long nodeId;
-    protected short portId;
+import net.floodlightcontroller.core.web.serializers.DPIDSerializer;
+import net.floodlightcontroller.linkdiscovery.SwitchPortTuple;
 
+import org.codehaus.jackson.annotate.JsonProperty;
+import org.codehaus.jackson.map.annotate.JsonSerialize;
+import org.openflow.util.HexString;
+
+/**
+ * A NodePortTuple is similar to a SwitchPortTuple
+ * but it only stores IDs instead of references
+ * to the actual objects.
+ * @author srini
+ */
+public class NodePortTuple {
+    protected long nodeId; // switch DPID
+    protected short portId; // switch port id
+
+    /**
+     * Creates a NodePortTuple
+     * @param nodeId The DPID of the switch
+     * @param portId The port of the switch
+     */
     public NodePortTuple(long nodeId, short portId) {
         this.nodeId = nodeId;
         this.portId = portId;
     }
+    
+    /**
+     * Creates a NodePortTuple from the same information
+     * in a SwitchPortTuple
+     * @param swt
+     */
+    public NodePortTuple(SwitchPortTuple swt) {
+        if (swt.getSw() != null)
+            this.nodeId = swt.getSw().getId();
+        else
+            this.nodeId = 0;
+        this.portId = swt.getPort();
+    }
 
+    @JsonProperty("switch")
+    @JsonSerialize(using=DPIDSerializer.class)
     public long getNodeId() {
         return nodeId;
     }
     public void setNodeId(long nodeId) {
         this.nodeId = nodeId;
     }
+    @JsonProperty("port")
     public short getPortId() {
         return portId;
     }
@@ -23,7 +57,7 @@ public class NodePortTuple {
     }
     
     public String toString() {
-        return "[id=" + new Long(nodeId) + ", port=" + new Short(portId) + "]";
+        return "[id=" + HexString.toHexString(nodeId) + ", port=" + new Short(portId) + "]";
     }
 
     @Override
