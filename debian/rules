@@ -16,3 +16,6 @@ export JAVA_HOME=/usr/lib/jvm/default-java
 
 get-orig-source:
 	uscan --force-download --rename
+
+override_dh_auto_test-indep:
+
