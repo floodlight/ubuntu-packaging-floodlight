@@ -24,16 +24,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ScheduledExecutorService;
 
 import net.floodlightcontroller.core.FloodlightContext;
 import net.floodlightcontroller.core.IFloodlightProviderService;
+import net.floodlightcontroller.core.IHAListener;
 import net.floodlightcontroller.core.IInfoProvider;
 import net.floodlightcontroller.core.IOFMessageListener;
 import net.floodlightcontroller.core.IOFSwitch;
 import net.floodlightcontroller.core.IOFSwitchFilter;
 import net.floodlightcontroller.core.IOFSwitchListener;
-import net.floodlightcontroller.core.IOFMessageListener.Command;
+import net.floodlightcontroller.core.IListener.Command;
 import net.floodlightcontroller.core.module.FloodlightModuleContext;
 import net.floodlightcontroller.core.module.FloodlightModuleException;
 import net.floodlightcontroller.core.module.IFloodlightModule;
@@ -52,11 +52,9 @@ import org.openflow.protocol.factory.BasicFactory;
 public class MockFloodlightProvider implements IFloodlightModule, IFloodlightProviderService {
     protected Map<OFType, List<IOFMessageListener>> listeners;
     protected List<IOFSwitchListener> switchListeners;
+    protected List<IHAListener> haListeners;
     protected Map<Long, IOFSwitch> switches;
     protected BasicFactory factory;
-    
-    protected ScheduledExecutorService mockExecutor = 
-        new MockScheduledExecutor();
 
     /**
      * 
@@ -65,6 +63,7 @@ public class MockFloodlightProvider implements IFloodlightModule, IFloodlightPro
         listeners = new ConcurrentHashMap<OFType, List<IOFMessageListener>>();
         switches = new ConcurrentHashMap<Long, IOFSwitch>();
         switchListeners = new CopyOnWriteArrayList<IOFSwitchListener>();
+        haListeners = new CopyOnWriteArrayList<IHAListener>();
         factory = new BasicFactory();
     }
 
@@ -175,15 +174,6 @@ public class MockFloodlightProvider implements IFloodlightModule, IFloodlightPro
     public void terminate() {
     }
 
-    /**
-     * Return a mock executor that will simply execute each task 
-     * synchronously once.
-     */
-    @Override
-    public ScheduledExecutorService getScheduledExecutor() {
-        return mockExecutor;
-    }
-
     @Override
     public boolean injectOfMessage(IOFSwitch sw, OFMessage msg) {
         dispatchMessage(sw, msg);
@@ -191,8 +181,9 @@ public class MockFloodlightProvider implements IFloodlightModule, IFloodlightPro
     }
     
     @Override
-    public boolean injectOfMessage(IOFSwitch sw, OFMessage msg, FloodlightContext bContext) {        
-        dispatchMessage(sw, msg);        
+    public boolean injectOfMessage(IOFSwitch sw, OFMessage msg, 
+                                   FloodlightContext bContext) {        
+        dispatchMessage(sw, msg, bContext);     
         return true;
     }
     
@@ -224,15 +215,6 @@ public class MockFloodlightProvider implements IFloodlightModule, IFloodlightPro
             getModuleDependencies() {
         // TODO Auto-generated method stub
         return null;
-    }
-
-    @Override
-    public Role getRole() {
-        return null;
-    }
-    
-    @Override
-    public void setRole(Role role) {
     }
     
     @Override
@@ -267,4 +249,53 @@ public class MockFloodlightProvider implements IFloodlightModule, IFloodlightPro
 		// TODO Auto-generated method stub
 		return null;
 	}
+
+    @Override
+    public void addHAListener(IHAListener listener) {
+        haListeners.add(listener);
+    }
+
+    @Override
+    public void removeHAListener(IHAListener listener) {
+        haListeners.remove(listener);
+    }
+    
+    @Override
+    public Role getRole() {
+        return null;
+    }
+    
+    @Override
+    public void setRole(Role role) {
+        
+    }
+    
+    /**
+     * Dispatches a new role change notification
+     * @param oldRole
+     * @param newRole
+     */
+    public void dispatchRoleChanged(Role oldRole, Role newRole) {
+        for (IHAListener rl : haListeners) {
+            rl.roleChanged(oldRole, newRole);
+        }
+    }
+
+    @Override
+    public String getControllerId() {
+        return "localhost";
+    }
+
+	@Override
+	public Map<String, String> getControllerNodeIPs() {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+	@Override
+	public long getSystemStartTime() {
+		// TODO Auto-generated method stub
+		return 0;
+	}
+
 }

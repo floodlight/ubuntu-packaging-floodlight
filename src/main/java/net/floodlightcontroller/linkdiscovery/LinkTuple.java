@@ -17,16 +17,22 @@
 
 package net.floodlightcontroller.linkdiscovery;
 
+import org.codehaus.jackson.map.annotate.JsonSerialize;
+
 import net.floodlightcontroller.core.IOFSwitch;
+import net.floodlightcontroller.core.web.serializers.LinkTupleSerializer;
+import net.floodlightcontroller.linkdiscovery.ILinkDiscovery.LinkType;
 
 /**
  *
  *
  * @author David Erickson (daviderickson@cs.stanford.edu)
  */
+@JsonSerialize(using=LinkTupleSerializer.class)
 public class LinkTuple {
     protected SwitchPortTuple src;
     protected SwitchPortTuple dst;
+    protected LinkType type = null;
 
     /**
      * @param src
@@ -51,6 +57,22 @@ public class LinkTuple {
      */
     public LinkTuple(IOFSwitch src, Integer srcPort, IOFSwitch dst, Integer dstPort) {
         this(src, srcPort.shortValue(), dst, dstPort.shortValue());
+    }
+    
+    /**
+     * Set the LinkType, not done by default used primarily for the REST API
+     * @param t
+     */
+    public void setType(LinkType t) {
+        this.type = t;
+    }
+
+    /**
+     * Gets the LinkType, used by the JSON serializer for the REST API
+     * @return the LinkType
+     */
+    public LinkType getType() {
+        return type;
     }
 
     /**
