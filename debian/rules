@@ -13,3 +13,6 @@ export JAVA_HOME=/usr/lib/jvm/default-java
 
 %:
 	dh $@
+
+get-orig-source:
+	uscan --force-download --rename
