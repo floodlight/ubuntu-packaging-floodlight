@@ -43,6 +43,10 @@ Depends:
  libthrift-java,
  ${misc:Depends}
 Suggests: thrift-compiler
-Description: Java based OpenFlow controller
- Floodlight is a Java based OpenFlow controller originally written by David
- Erickson at Stanford University.
+Description: High performance Java based OpenFlow network controller
+ Floodlight is a high performance Java based OpenFlow controller originally
+ written by David Erickson at Stanford University.
+ .
+ Floodlight supports a broad range of virtual and physical OpenFlow switches
+ and has rich support for mixed OpenFlow and non-OpenFlow networks supporting
+ management multiple islands of OpenFlow switches.
