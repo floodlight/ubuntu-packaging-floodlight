@@ -2,8 +2,23 @@
 
 NAME=floodlight
 
-if [ "$1" = "configure" ]; then
-   adduser --quiet --group --system --no-create-home --home /nonexistent $NAME
-fi
+case "$1" in
+    configure)
+        if ! id $NAME > /dev/null 2>&1 ; then
+            adduser --quiet --group --system --disable-password \
+                --no-create-home --home /dev/null $NAME
+        fi
+    ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+    ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+    ;;
+esac
 
 #DEBHELPER#
+
+exit 0

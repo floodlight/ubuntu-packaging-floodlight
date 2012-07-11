@@ -15,7 +15,8 @@ Copyright: 2008 The Board of Trustees of The Leland Stanford Junior University
 License: Apache-2.0
 
 Files: debian/*
-Copyright: 2012 Big Switch Networks <rlane@bigswitch.com>
+Copyright: 2012 Big Switch Networks <rlane@bigswitch.com>,
+           2012 Canonical Ltd (http://www.canonical.com)
 License: Apache-2.0
 
 License: Apache-2.0
