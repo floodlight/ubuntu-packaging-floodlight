@@ -3,15 +3,46 @@ Section: net
 Priority: extra
 Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
 XSBC-Original-Maintainer: Rich Lane <rlane@bigswitch.com>
-Build-Depends: debhelper (>= 8.0.0), ant, ant-optional, default-jdk, liblogback-java, libjackson-json-java, libeasymock-java, libslf4j-java, libnetty-java, libargs4j-java, libconcurrentlinkedhashmap-java, jython, junit4, libasm3-java, libantlr-java, librestlet-java, libthrift-java, thrift-compiler
+Build-Depends:
+ ant,
+ ant-optional,
+ debhelper (>= 8.0.0),
+ default-jdk,
+ junit4,
+ jython,
+ libantlr-java,
+ libargs4j-java,
+ libasm3-java,
+ libconcurrentlinkedhashmap-java,
+ libeasymock-java,
+ libjackson-json-java,
+ liblogback-java,
+ libnetty-java,
+ librestlet-java,
+ libslf4j-java,
+ libthrift-java,
+ thrift-compiler
 Standards-Version: 3.9.3
 Homepage: http://floodlight.openflowhub.org/
-Vcs-Git: git://github.com/floodlight/floodlight.git
-Vcs-Browser: https://github.com/floodlight/floodlight
 
 Package: floodlight
 Architecture: all
-Depends: ${misc:Depends}, default-jre, liblogback-java, libjackson-json-java, libeasymock-java, libslf4j-java, libnetty-java, libargs4j-java, libconcurrentlinkedhashmap-java, jython, libantlr-java, librestlet-java, libthrift-java, thrift-compiler
+Depends:
+ adduser,
+ default-jre | java6-runtime,
+ jython,
+ libantlr-java,
+ libargs4j-java,
+ libconcurrentlinkedhashmap-java,
+ libeasymock-java,
+ libjackson-json-java,
+ liblogback-java,
+ libnetty-java,
+ librestlet-java,
+ libslf4j-java,
+ libthrift-java,
+ ${misc:Depends}
+Suggests: thrift-compiler
 Description: Java based OpenFlow controller
  Floodlight is a Java based OpenFlow controller originally written by David
  Erickson at Stanford University.
