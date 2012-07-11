@@ -1,7 +1,8 @@
 Source: floodlight
 Section: net
 Priority: extra
-Maintainer: Rich Lane <rlane@bigswitch.com>
+Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
+XSBC-Original-Maintainer: Rich Lane <rlane@bigswitch.com>
 Build-Depends: debhelper (>= 8.0.0), ant, ant-optional, default-jdk, liblogback-java, libjackson-json-java, libeasymock-java, libslf4j-java, libnetty-java, libargs4j-java, libconcurrentlinkedhashmap-java, jython, junit4, libasm3-java, libantlr-java, librestlet-java, libthrift-java, thrift-compiler
 Standards-Version: 3.9.3
 Homepage: http://floodlight.openflowhub.org/
