@@ -49,4 +49,4 @@ Description: High performance Java based OpenFlow network controller
  .
  Floodlight supports a broad range of virtual and physical OpenFlow switches
  and has rich support for mixed OpenFlow and non-OpenFlow networks supporting
- management multiple islands of OpenFlow switches.
+ management of multiple islands of OpenFlow switches.
