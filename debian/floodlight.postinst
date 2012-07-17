@@ -5,7 +5,7 @@ NAME=floodlight
 case "$1" in
     configure)
         if ! id $NAME > /dev/null 2>&1 ; then
-            adduser --quiet --group --system --disable-password \
+            adduser --quiet --group --system --disabled-password \
                 --no-create-home --home /dev/null $NAME
         fi
     ;;
